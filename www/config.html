@@ -374,6 +374,11 @@ function reloadCfg(){
       var e=document.getElementById(k);if(e&&d[k]!==undefined)e.value=d[k];
     });
     if(d.proto){var ep=document.getElementById('proto');if(ep)ep.value=d.proto;sp(d.proto);}
+    // Sync ocean fields into cfg so save() picks them up without user re-entering
+    ['ocean_host','ocean_path','ocean_username','ocean_password','ocean_metric_id'].forEach(function(k){
+      if(d[k]!==undefined)cfg[k]=d[k];
+    });
+    if(d.ocean_port!==undefined)cfg.ocean_port=d.ocean_port;
     // Backward compat: если server_host пустой — берём из tb_host/tb_token
     var _sh=document.getElementById('server_host');
     var _th=document.getElementById('tb_host');
