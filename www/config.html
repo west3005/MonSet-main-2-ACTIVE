@@ -419,14 +419,13 @@ function reloadCfg(){
   }).catch(function(){});
 }
 
-function save(){
-  // checkboxes
+// Синхронизирует DOM → cfg для всех полей (используется save и exp)
+function syncSaveFields(){
   var bk=['ch_eth','ch_gsm','ch_wifi','ch_iridium','chain_mode','deep_sleep_enabled',
           'schedule_enabled','mtcpm_en','mtcps_en','ntp_enabled','web_auth_enabled',
           'web_exclusive_mode','alerts_enabled','alert_on_channel_fail',
           'alert_on_sensor_fail','mqtt_tls','eth_dhcp'];
   bk.forEach(function(k){var e=document.getElementById(k);if(e)cfg[k]=e.checked});
-  // text/number/password inputs
   var tx=['server_host','server_token','server_path','tb_host','tb_token','mqtt_host','mqtt_user','mqtt_topic',
           'mqtt_pass','webhook_url','schedule_start','schedule_stop','eth_ip','eth_sn',
           'eth_gw','eth_dns','gsm_apn','gsm_user','gsm_pass','wifi_ssid','wifi_pass',
@@ -438,25 +437,28 @@ function save(){
           'web_port','web_idle_timeout_s','batt_low','channel_timeout_s',
           'channel_retry_s','channel_max_retries','ocean_port'];
   ni.forEach(function(k){var e=document.getElementById(k);if(e)cfg[k]=parseInt(e.value,10)||0});
-  // selects
-  // cfg.proto уже установлен в sp() при клике на карточку
-  ['webhook_method'].forEach(function(k){
-    var e=document.getElementById(k);if(e)cfg[k]=e.value;
-  });
-  ['mqtt_qos','tz_off'].forEach(function(k){
-    var e=document.getElementById(k);if(e)cfg[k]=parseInt(e.value,10)||0;
-  });
-  var sl_regs=regs.map(function(r){return{ad:r.ad,si:SRC.indexOf(r.src)<0?0:SRC.indexOf(r.src),dt:r.dt,sc:r.sc,un:r.un,nm:r.nm}});
-  // Sync generic server fields into legacy aliases BEFORE payload build.
+  ['webhook_method'].forEach(function(k){var e=document.getElementById(k);if(e)cfg[k]=e.value});
+  ['mqtt_qos','tz_off'].forEach(function(k){var e=document.getElementById(k);if(e)cfg[k]=parseInt(e.value,10)||0});
+  // sync server aliases
   var _shv=document.getElementById('server_host');var _thv=document.getElementById('tb_host');
-  if(_shv&&_thv){cfg.tb_host=_shv.value;_thv.value=_shv.value; cfg.server_host=_shv.value;}
+  if(_shv&&_thv){cfg.tb_host=_shv.value;_thv.value=_shv.value;cfg.server_host=_shv.value;}
   var _stv=document.getElementById('server_token');var _ttv=document.getElementById('tb_token');
-  if(_stv&&_ttv){cfg.tb_token=_stv.value;_ttv.value=_stv.value; cfg.server_token=_stv.value;}
-  var _spv=document.getElementById('server_path'); if(_spv){cfg.server_path=_spv.value;}
-  var _srvp=document.getElementById('server_port'); if(_srvp){cfg.server_port=parseInt(_srvp.value,10)||443; cfg.tb_port=cfg.server_port;}
-  // Keep server_url empty so firmware builds URL from host/path/port.
+  if(_stv&&_ttv){cfg.tb_token=_stv.value;_ttv.value=_stv.value;cfg.server_token=_stv.value;}
+  var _spv=document.getElementById('server_path');if(_spv)cfg.server_path=_spv.value;
+  var _srvp=document.getElementById('server_port');if(_srvp){cfg.server_port=parseInt(_srvp.value,10)||443;cfg.tb_port=cfg.server_port;}
   cfg.server_url='';
-  var out=Object.assign({},cfg,{rtu:rtu,tcp_devs:tcpd,regs:regs,sl_regs:sl_regs,chain_order:cord,co_en:coen});
+}
+
+// Собирает финальный объект для отправки на SD / экспорта
+function buildOut(sl_regs){
+  return Object.assign({},cfg,{rtu:rtu,tcp_devs:tcpd,regs:regs,sl_regs:sl_regs,chain_order:cord,co_en:coen});
+}
+
+function save(){
+  syncSaveFields(); // DOM → cfg
+  var sl_regs=regs.map(function(r){return{ad:r.ad,si:SRC.indexOf(r.src)<0?0:SRC.indexOf(r.src),dt:r.dt,sc:r.sc,un:r.un,nm:r.nm}});
+  // syncSaveFields() уже выполнена выше
+  var out=buildOut(sl_regs);
   fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(out)})
     .then(function(r){return r.json().then(function(d){
       if(r.ok && d.saved_to_sd) showMsg(true,'✓ Сохранено на SD');
@@ -473,7 +475,11 @@ function rst(){
 }
 
 function exp(){
-  var b=new Blob([JSON.stringify(Object.assign({},cfg,{rtu:rtu,tcp_devs:tcpd,regs:regs}),null,2)],{type:'application/json'});
+  // Собираем ровно тот же out что уходит на SD в save()
+  var sl_regs=regs.map(function(r){return{ad:r.ad,si:SRC.indexOf(r.src)<0?0:SRC.indexOf(r.src),dt:r.dt,sc:r.sc,un:r.un,nm:r.nm}});
+  syncSaveFields();
+  var out=buildOut(sl_regs);
+  var b=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
   var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='config.jsn';a.click();
 }
 
