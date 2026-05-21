@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MonSet — Конфигурация</title>
 <style>*{box-sizing:border-box;margin:0;padding:0}body{background:#0e1117;color:#c9d1d9;font:14px/1.5 system-ui,sans-serif;padding-bottom:70px}a{color:#2dd4bf;text-decoration:none}.nav{background:#161b22;border-bottom:1px solid #30363d;display:flex;gap:4px;padding:8px 12px}.nav a{padding:6px 14px;border-radius:6px;color:#c9d1d9;font-size:13px}.nav a.act{background:#2dd4bf;color:#0e1117;font-weight:600}.hdr{padding:14px 16px;border-bottom:1px solid #30363d;background:#161b22;font-size:18px;font-weight:700;color:#2dd4bf}details{background:#161b22;border:1px solid #30363d;border-radius:8px;margin:10px}summary{padding:10px 14px;cursor:pointer;font-weight:600;font-size:13px;color:#2dd4bf;user-select:none;list-style:none;display:flex;align-items:center;gap:6px}summary::before{content:"▶";font-size:10px;transition:transform .2s}details[open]>summary::before{transform:rotate(90deg)}.sc{padding:12px 14px 14px}.r{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center}.f{display:flex;flex-direction:column;gap:3px;flex:1;min-width:120px}label{font-size:11px;color:#8b949e}input[type=text],input[type=number],input[type=password],select{background:#0e1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;padding:5px 8px;font-size:13px;width:100%}input:focus,select:focus{outline:none;border-color:#2dd4bf}.tg{display:flex;align-items:center;gap:8px}.tg input[type=checkbox]{appearance:none;width:36px;height:20px;background:#30363d;border-radius:10px;cursor:pointer;position:relative;flex-shrink:0;transition:background .2s}.tg input[type=checkbox]:checked{background:#2dd4bf}.tg input[type=checkbox]::after{content:"";position:absolute;width:14px;height:14px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .2s}.tg input[type=checkbox]:checked::after{left:19px}.tg span{font-size:13px;white-space:nowrap}.btn{background:#2dd4bf;color:#0e1117;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px;font-weight:600}.btn:hover{opacity:.85}.btn.s{background:#30363d;color:#c9d1d9}.cd{background:#0e1117;border:1px solid #30363d;border-radius:6px;padding:10px;margin-bottom:8px}.ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.tabs{display:flex;gap:4px;margin-bottom:10px}.tab{padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px;background:#0e1117;border:1px solid #30363d;color:#c9d1d9}.tab.act{background:#2dd4bf;color:#0e1117;border-color:#2dd4bf;font-weight:600}.tp{display:none}.tp.act{display:block}.bar{position:fixed;bottom:8px;left:60px;right:8px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 16px;display:flex;gap:8px;z-index:99;box-shadow:0 -2px 16px rgba(0,0,0,.4)}.dr{display:flex;align-items:center;gap:6px;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:5px 8px;margin-bottom:5px}.dr span{flex:1;font-size:12px}.dr button{background:none;border:none;color:#8b949e;cursor:pointer;font-size:14px;padding:0 2px}.dr button:hover{color:#2dd4bf}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#0e1117;color:#8b949e;padding:5px 6px;text-align:left;border-bottom:1px solid #30363d}td{padding:4px 5px;border-bottom:1px solid #1c2128}td input,td select{padding:3px 5px;font-size:12px}.msg{display:none;padding:6px 12px;border-radius:5px;font-size:13px;font-weight:600}.ok{background:#1a3a2e;color:#2dd4bf}.er{background:#3a1a1a;color:#f87171}.warn{background:#2a2200;color:#e3b341}.sh{font-size:12px;color:#8b949e;margin:8px 0 4px;font-weight:600}
+.proto-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.proto-card{display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:6px;border:1px solid #30363d;background:#0e1117;cursor:pointer;font-size:12px;color:#8b949e;user-select:none;transition:border-color .15s,color .15s}
+.proto-card:hover{border-color:#2dd4bf;color:#c9d1d9}
+.proto-card.active{border-color:#2dd4bf;color:#2dd4bf;background:#0d2320}
+.proto-card .proto-dot{width:10px;height:10px;border-radius:50%;border:2px solid #484f58;flex-shrink:0;transition:border-color .15s,background .15s}
+.proto-card.active .proto-dot{border-color:#2dd4bf;background:#2dd4bf}
 
 /* ── layout shell (sidebar + wrap) ─────────────────── */
 body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
@@ -146,8 +152,15 @@ body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
 <div class="f"><label>Макс попыток</label><input type="number" id="channel_max_retries" value="3" onchange="c('channel_max_retries',+this.value)"></div>
 </div></div></details>
 <details><summary>B: Протокол и сервер</summary><div class="sc">
-<div class="f" style="max-width:260px;margin-bottom:10px"><label>Протокол</label>
-<select id="proto" onchange="sp(this.value)"><option value="https_generic">HTTPS (любой сервер)</option><option value="ocean_monitor">Ocean Monitor (ocean-monitor.ru)</option><option value="https_tb">HTTPS (legacy)</option><option value="mqtt_gen">MQTT (Generic)</option><option value="mqtt_tb">MQTT (TB legacy)</option><option value="webhook">HTTP Webhook</option></select></div>
+<div style="margin-bottom:10px"><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:6px">Протокол</label>
+<div class="proto-grid" id="proto-grid">
+<div class="proto-card active" data-proto="https_generic" onclick="sp('https_generic')"><div class="proto-dot"></div>HTTPS Generic</div>
+<div class="proto-card" data-proto="ocean_monitor" onclick="sp('ocean_monitor')"><div class="proto-dot"></div>Ocean Monitor</div>
+<div class="proto-card" data-proto="https_tb" onclick="sp('https_tb')"><div class="proto-dot"></div>HTTPS Legacy</div>
+<div class="proto-card" data-proto="mqtt_gen" onclick="sp('mqtt_gen')"><div class="proto-dot"></div>MQTT Generic</div>
+<div class="proto-card" data-proto="mqtt_tb" onclick="sp('mqtt_tb')"><div class="proto-dot"></div>MQTT TB</div>
+<div class="proto-card" data-proto="webhook" onclick="sp('webhook')"><div class="proto-dot"></div>Webhook</div>
+</div></div>
 <div id="g_tb"><div class="r"><div class="f"><label>Хост сервера</label><input type="text" id="server_host" placeholder="monset.ru" onchange="c('server_host',this.value)"></div><div class="f"><label>Токен (X-Device-Token)</label><input type="text" id="server_token" onchange="c('server_token',this.value)"></div><div class="f"><label>Путь</label><input type="text" id="server_path" value="/api/ingest" onchange="c('server_path',this.value)"></div><div class="f" style="max-width:90px"><label>Порт</label><input type="number" id="server_port" value="443" onchange="c('server_port',+this.value)"></div></div><!-- legacy hidden --><input type="hidden" id="tb_host"><input type="hidden" id="tb_token"><input type="hidden" id="tb_port" value="443"></div>
 <div id="g_mqtt" style="display:none"><div class="r"><div class="f"><label>MQTT Хост</label><input type="text" id="mqtt_host" onchange="c('mqtt_host',this.value)"></div><div class="f" style="max-width:90px"><label>Порт</label><input type="number" id="mqtt_port" value="1883" onchange="c('mqtt_port',+this.value)"></div></div>
 <div class="r"><div class="f"><label>Пользователь</label><input type="text" id="mqtt_user" onchange="c('mqtt_user',this.value)"></div><div class="f"><label>Пароль</label><input type="password" id="mqtt_pass" onchange="c('mqtt_pass',this.value)"></div></div>
@@ -216,10 +229,17 @@ function c(k,v){cfg[k]=v}
 function sh(id,v){document.getElementById(id).style.display=v?'flex':'none'}
 
 function sp(v){
+  // Обновляем визуал карточек
+  document.querySelectorAll('#proto-grid .proto-card').forEach(function(c){
+    var active=(c.getAttribute('data-proto')===v);
+    c.classList.toggle('active',active);
+  });
+  // Показываем нужный блок полей
   document.getElementById('g_tb').style.display=(v==='https_generic'||v==='https_tb'||v==='mqtt_tb')?'block':'none';
   document.getElementById('g_mqtt').style.display=(v==='mqtt_gen'||v==='mqtt_tb')?'block':'none';
   document.getElementById('g_wh').style.display=(v==='webhook')?'block':'none';
   document.getElementById('g_ocean').style.display=(v==='ocean_monitor')?'block':'none';
+  // Жёстко фиксируем значение в cfg — независимо от того что вернула прошивка
   cfg.proto=v;
 }
 
@@ -370,10 +390,10 @@ function reloadCfg(){
     tx.forEach(function(k){var e=document.getElementById(k);if(e&&d[k]!==undefined)e.value=d[k]});
     if(d.ocean_port!==undefined){var _op=document.getElementById('ocean_port');if(_op)_op.value=d.ocean_port;}
     // select elements: proto, mqtt_qos, webhook_method, tz_off
-    ['proto','mqtt_qos','webhook_method','tz_off'].forEach(function(k){
+    ['mqtt_qos','webhook_method','tz_off'].forEach(function(k){
       var e=document.getElementById(k);if(e&&d[k]!==undefined)e.value=d[k];
     });
-    if(d.proto){var ep=document.getElementById('proto');if(ep)ep.value=d.proto;sp(d.proto);}
+    sp(d.proto||'https_generic'); // фиксируем карточку и cfg.proto
     // Sync ocean fields into cfg so save() picks them up without user re-entering
     ['ocean_host','ocean_path','ocean_username','ocean_password','ocean_metric_id'].forEach(function(k){
       if(d[k]!==undefined)cfg[k]=d[k];
@@ -419,7 +439,8 @@ function save(){
           'channel_retry_s','channel_max_retries','ocean_port'];
   ni.forEach(function(k){var e=document.getElementById(k);if(e)cfg[k]=parseInt(e.value,10)||0});
   // selects
-  ['proto','webhook_method'].forEach(function(k){
+  // cfg.proto уже установлен в sp() при клике на карточку
+  ['webhook_method'].forEach(function(k){
     var e=document.getElementById(k);if(e)cfg[k]=e.value;
   });
   ['mqtt_qos','tz_off'].forEach(function(k){
