@@ -85,7 +85,7 @@ void RuntimeConfig::setDefaultsFromConfig() {
     copyStr(mqtt_topic, sizeof(mqtt_topic), "v1/devices/me/telemetry");
     mqtt_qos = 1;
     mqtt_tls = false;
-    protocol = ProtocolMode::HTTPS_THINGSBOARD;
+    protocol = ProtocolMode::HTTPS_GENERIC;
 
     // Webhook defaults
     webhook_url[0] = 0;
@@ -198,6 +198,22 @@ static bool jsonGetU8(const char* json, const char* key, uint8_t& out) {
     out = (uint8_t)std::strtoul(p, nullptr, 10);
     return true;
 }
+static void normalizeHost(char* s, size_t sz) {
+    if (!s || sz == 0 || s[0] == 0) return;
+    const char* p = s;
+    if (std::strncmp(p, "https://", 8) == 0) p += 8;
+    else if (std::strncmp(p, "http://", 7) == 0) p += 7;
+    char tmp[128]{};
+    size_t i = 0;
+    while (p[i] && p[i] != '/' && i < sizeof(tmp) - 1) {
+        tmp[i] = p[i];
+        ++i;
+    }
+    tmp[i] = 0;
+    std::strncpy(s, tmp, sz - 1);
+    s[sz - 1] = 0;
+}
+
 static bool jsonGetBool(const char* json, const char* key, bool& out) {
     const char* p = findKey(json, key);
     if (!p) return false;
@@ -460,7 +476,9 @@ static bool parseBoolArray(const char* json, const char* key, bool* out, uint8_t
 // -----------------------------------------------------------------------------
 bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
     if (!json || len < 2) return false;
-    RuntimeConfig tmp = *this;
+    // Use global scratch buffer to avoid placing a full RuntimeConfig copy (~8KB) on the task stack.
+    RuntimeConfig& tmp = CfgBackup();
+    tmp = *this;
 
     // --- Legacy fields (backward compat) ---
     (void)jsonGetBool  (json, "complex_enabled", tmp.complex_enabled);
@@ -547,7 +565,7 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
           if (std::strcmp(proto,"mqtt")==0 || std::strcmp(proto,"MQTT")==0)
               tmp.protocol = ProtocolMode::MQTT_GENERIC;
           else
-              tmp.protocol = ProtocolMode::HTTPS_THINGSBOARD;
+              tmp.protocol = ProtocolMode::HTTPS_GENERIC;
       } }
 
     // Webhook
@@ -635,19 +653,40 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
     // Protocol alias: "proto" -> ProtocolMode enum
     { char pv[16]{};
       if (jsonGetString(json,"proto",pv,sizeof(pv))) {
-          if      (std::strcmp(pv,"https_tb") ==0) { tmp.protocol=ProtocolMode::HTTPS_THINGSBOARD; tmp.proto.mode=ProtocolMode::HTTPS_THINGSBOARD; }
-          else if (std::strcmp(pv,"mqtt_tb")  ==0) { tmp.protocol=ProtocolMode::MQTT_THINGSBOARD;  tmp.proto.mode=ProtocolMode::MQTT_THINGSBOARD;  }
-          else if (std::strcmp(pv,"mqtt_gen") ==0) { tmp.protocol=ProtocolMode::MQTT_GENERIC;      tmp.proto.mode=ProtocolMode::MQTT_GENERIC;      }
-          else if (std::strcmp(pv,"webhook")  ==0) { tmp.protocol=ProtocolMode::WEBHOOK_HTTP;      tmp.proto.mode=ProtocolMode::WEBHOOK_HTTP;      }
+          if      (std::strcmp(pv,"https_generic")==0) { tmp.protocol=ProtocolMode::HTTPS_GENERIC;    tmp.proto.mode=ProtocolMode::HTTPS_GENERIC;    }
+          else if (std::strcmp(pv,"https_tb")     ==0) { tmp.protocol=ProtocolMode::HTTPS_GENERIC;    tmp.proto.mode=ProtocolMode::HTTPS_GENERIC;    }
+          else if (std::strcmp(pv,"mqtt_tb")      ==0) { tmp.protocol=ProtocolMode::MQTT_THINGSBOARD; tmp.proto.mode=ProtocolMode::MQTT_THINGSBOARD; }
+          else if (std::strcmp(pv,"mqtt_gen")     ==0) { tmp.protocol=ProtocolMode::MQTT_GENERIC;     tmp.proto.mode=ProtocolMode::MQTT_GENERIC;     }
+          else if (std::strcmp(pv,"webhook")      ==0) { tmp.protocol=ProtocolMode::WEBHOOK_HTTP;     tmp.proto.mode=ProtocolMode::WEBHOOK_HTTP;     }
       } }
 
-    // ThingsBoard: tb_host / tb_token / tb_port
+    // Legacy server aliases: tb_host / tb_token / tb_port (backward compat)
     { char s[64]{};
-      if (jsonGetString(json,"tb_host", s,sizeof(s))) copyStr(tmp.proto.tb_host, sizeof(tmp.proto.tb_host), s); }
+      if (jsonGetString(json,"tb_host", s,sizeof(s))) { normalizeHost(s, sizeof(s)); copyStr(tmp.proto.tb_host, sizeof(tmp.proto.tb_host), s); } }
     { char s[128]{};
       if (jsonGetString(json,"tb_token",s,sizeof(s))) copyStr(tmp.proto.tb_token,sizeof(tmp.proto.tb_token),s); }
     { uint16_t v16=0;
       if (jsonGetU16(json,"tb_port",v16) && v16>0) tmp.proto.tb_port = v16; }
+
+    // Universal server fields
+    { char s[64]{};
+      if (jsonGetString(json,"server_host",s,sizeof(s))) { normalizeHost(s, sizeof(s)); copyStr(tmp.proto.server_host,sizeof(tmp.proto.server_host),s); } }
+    { char s[128]{};
+      if (jsonGetString(json,"server_token",s,sizeof(s))) copyStr(tmp.proto.server_token,sizeof(tmp.proto.server_token),s); }
+    { char s[128]{};
+      if (jsonGetString(json,"server_path",s,sizeof(s))) copyStr(tmp.proto.server_path,sizeof(tmp.proto.server_path),s); }
+    { uint16_t v16=0;
+      if (jsonGetU16(json,"server_port",v16) && v16>0) tmp.proto.server_port = v16; }
+
+    // Backward compat: tb_host/tb_token -> server_host/server_token if server_host not set
+    if (tmp.proto.tb_host[0] && !tmp.proto.server_host[0])
+        copyStr(tmp.proto.server_host, sizeof(tmp.proto.server_host), tmp.proto.tb_host);
+    normalizeHost(tmp.proto.tb_host, sizeof(tmp.proto.tb_host));
+    normalizeHost(tmp.proto.server_host, sizeof(tmp.proto.server_host));
+    if (tmp.proto.tb_token[0] && !tmp.proto.server_token[0])
+        copyStr(tmp.proto.server_token, sizeof(tmp.proto.server_token), tmp.proto.tb_token);
+    if (tmp.proto.tb_port && tmp.proto.tb_port != 443 && tmp.proto.server_port == 443)
+        tmp.proto.server_port = tmp.proto.tb_port;
 
     // NTP: ntp_server / ntp_enabled / tz_off
     { char s[64]{};
@@ -869,7 +908,7 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
     ftoa6(sensor_zero_level, zStr, sizeof(zStr));
     ftoa6(sensor_divider,    dStr, sizeof(dStr));
 
-    static char json[10240];
+    static char json[20480];
     int n = 0;
 
     n += std::snprintf(json+n, sizeof(json)-n,
@@ -1047,13 +1086,17 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
     if (n<0||n>=(int)sizeof(json)) goto overflow;
 
     {
-        const char* protoStr = "https_tb";
+        const char* protoStr = "https_generic";
         if      (proto.mode==ProtocolMode::MQTT_GENERIC)     protoStr = "mqtt_gen";
         else if (proto.mode==ProtocolMode::MQTT_THINGSBOARD) protoStr = "mqtt_tb";
         else if (proto.mode==ProtocolMode::WEBHOOK_HTTP)     protoStr = "webhook";
 
         n += std::snprintf(json+n,sizeof(json)-n,
             "\"proto\":\"%s\","
+            "\"server_host\":\"%s\","
+            "\"server_token\":\"%s\","
+            "\"server_path\":\"%s\","
+            "\"server_port\":%u,"
             "\"tb_host\":\"%s\","
             "\"tb_token\":\"%s\","
             "\"tb_port\":%u,"
@@ -1093,7 +1136,8 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
             "\"sl_ctms\":%u"
             "}\n",
             protoStr,
-            proto.tb_host, proto.tb_token, (unsigned)proto.tb_port,
+            proto.server_host, proto.server_token, proto.server_path, (unsigned)proto.server_port,
+            proto.server_host, proto.server_token, (unsigned)proto.server_port,
             (unsigned)meas.poll_interval_s, (unsigned)meas.send_interval_s,
             (unsigned)meas.backup_retry_s,
             meas.deep_sleep_enabled?"true":"false", (unsigned)meas.deep_sleep_s,
@@ -1235,5 +1279,32 @@ void RuntimeConfig::log() const {
         DBG.info("  reg[%u]: port=%u slave=%u fc=%u start=%u cnt=%u name=%s",
             (unsigned)i,(unsigned)e.port_idx,(unsigned)e.slave_id,
             (unsigned)e.function,(unsigned)e.start_reg,(unsigned)e.count,e.name);
+    }
+}
+
+// ============================================================================
+// buildServerUrl — build effective HTTPS URL from config
+// ============================================================================
+void RuntimeConfig::buildServerUrl(char* out, size_t outSz) const {
+    if (!out || outSz == 0) return;
+    // If legacy server_url is set explicitly, use it as-is
+    if (server_url[0]) {
+        std::strncpy(out, server_url, outSz - 1);
+        out[outSz - 1] = 0;
+        return;
+    }
+    const char* host   = proto.server_host;
+    const char* path   = proto.server_path[0] ? proto.server_path : "/api/ingest";
+    uint16_t    port   = proto.server_port    ? proto.server_port  : 443;
+    if (!host[0]) {
+        out[0] = 0;
+        DBG.error("CFG: buildServerUrl failed: empty server_host");
+        return;
+    }
+    const char* scheme = (port == 80) ? "http" : "https";
+    if (port == 443 || port == 80) {
+        std::snprintf(out, outSz, "%s://%s%s", scheme, host, path);
+    } else {
+        std::snprintf(out, outSz, "%s://%s:%u%s", scheme, host, (unsigned)port, path);
     }
 }

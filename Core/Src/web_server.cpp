@@ -4047,15 +4047,10 @@ void WebServer::handleTestPage(uint8_t sn){
     writeHead(buf,n,bsz,"Test Send");
     SNCAT("<h2>&#9654; Test Send</h2>");
     writeNav(buf,n,bsz,"test");
-    SNCAT("<div class='card'><h3>Manual Trigger</h3>"
-          "<p style='color:#8b949e;font-size:13px;margin-bottom:14px'>"
-          "Send one data packet to the configured server URL immediately.</p>"
-          "<button class='btn' onclick='doTest()'>&#9654; Send Now</button>"
-          "<div id='res' style='margin-top:14px;padding:10px;border-radius:4px;"
-          "background:#21262d;min-height:36px;font-size:13px'>Ready.</div></div>"
-          "<div class='card'><h3>Target URL</h3>"
+    { char _effUrl[192]{}; Cfg().buildServerUrl(_effUrl, sizeof(_effUrl));
+    SNCAT("<div class='card'><h3>Target URL</h3>"
           "<div style='font-size:12px;color:#8b949e;word-break:break-all'>%s</div></div>",
-          Cfg().server_url);
+          _effUrl); }
     SNCAT("<script>"
           "var t;"
           "function doTest(){"
@@ -4149,10 +4144,10 @@ void WebServer::handleApiConfig(uint8_t sn){
 
     // Protocol string
     const char* protoStr =
-        (c.protocol==ProtocolMode::HTTPS_THINGSBOARD)?"https_tb":
-        (c.protocol==ProtocolMode::MQTT_THINGSBOARD) ?"mqtt_tb" :
-        (c.protocol==ProtocolMode::MQTT_GENERIC)     ?"mqtt_gen":
-        (c.protocol==ProtocolMode::WEBHOOK_HTTP)     ?"webhook" :"https_tb";
+        (c.protocol==ProtocolMode::HTTPS_GENERIC)    ?"https_generic":
+        (c.protocol==ProtocolMode::MQTT_THINGSBOARD) ?"mqtt_tb"      :
+        (c.protocol==ProtocolMode::MQTT_GENERIC)     ?"mqtt_gen"     :
+        (c.protocol==ProtocolMode::WEBHOOK_HTTP)     ?"webhook"      :"https_generic";
 
     // Channel flags (new sub-config takes priority, legacy as fallback)
     bool ch_eth  = c.channels.eth_enabled     || c.eth_enabled;
@@ -4168,7 +4163,7 @@ void WebServer::handleApiConfig(uint8_t sn){
     uint8_t  avg    = c.meas.avg_count        ? c.meas.avg_count       : c.avg_count;
 
     // Protocol fields (new sub-config takes priority, legacy as fallback)
-    const char* tb_host  = c.proto.tb_host[0]       ? c.proto.tb_host       : "thingsboard.cloud";
+    const char* tb_host  = c.proto.server_host[0]   ? c.proto.server_host   : (c.proto.tb_host[0] ? c.proto.tb_host : "");
     const char* tb_token = c.proto.tb_token;
     const char* mq_host  = c.proto.mqtt_host[0]     ? c.proto.mqtt_host     : c.mqtt_host;
     uint16_t    mq_port  = c.proto.mqtt_port         ? c.proto.mqtt_port     : c.mqtt_port;
@@ -4567,11 +4562,15 @@ void WebServer::handlePostConfig(uint8_t sn,const char* body){
         const char* r="{\"error\":\"empty body\"}";
         sendResponse(sn,400,"application/json",r,(uint16_t)std::strlen(r)); return;
     }
-    // Use CfgBackup() as rollback buffer — both singletons live in .bss, never on stack
-    CfgBackup() = Cfg();
-    if(Cfg().loadFromJson(body,std::strlen(body))){
-        bool sdSaved = Cfg().saveToSd(RUNTIME_CONFIG_FILENAME);
+
+    // Parse into backup object first; commit only after successful parse.
+    // This avoids rollback copies around save path and keeps mutation localized.
+    RuntimeConfig& tmp = CfgBackup();
+    if(tmp.loadFromJson(body,std::strlen(body))){
+        bool sdSaved = tmp.saveToSd(RUNTIME_CONFIG_FILENAME);
         if (sdSaved) m_sdOk = true;
+
+        Cfg() = tmp;
 
         char resp[256];
         if (sdSaved) {
@@ -4584,9 +4583,8 @@ void WebServer::handlePostConfig(uint8_t sn,const char* body){
         }
 
         sendResponse(sn, 200, "application/json", resp, (uint16_t)std::strlen(resp));
-        DBG.info("WebServer: config updated in RAM, sd_saved=%d", (int)sdSaved);
+        DBG.info("WebServer: config updated via tmp cfg, sd_saved=%d", (int)sdSaved);
     }else{
-        Cfg() = CfgBackup();  // rollback — parse failed
         const char* r="{\"error\":\"JSON parse failed\"}";
         sendResponse(sn,400,"application/json",r,(uint16_t)std::strlen(r));
     }

@@ -142,9 +142,10 @@ body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
         <!-- Канал -->
         <div class="card">
           <div class="card-title">Канал отправки</div>
+          <div style="margin-bottom:10px"><button class="btn-ghost btn-sm" onclick="refreshChannels()">↻ Обновить каналы</button></div>
           <div id="ch-list" style="display:flex;flex-direction:column;gap:6px">
             <!-- заполняется из /api/channels -->
-            <div style="color:#8b949e;font-size:13px">Загрузка каналов…</div>
+            <div style="color:#8b949e;font-size:13px">Нажмите «Обновить каналы»</div>
           </div>
         </div>
 
@@ -165,7 +166,7 @@ body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
           <div class="card-title">Отправка</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn-primary" id="btn-send" onclick="doSend()">▶ Отправить</button>
-            <button class="btn-ghost" onclick="pollResult()">↻ Обновить результат</button>
+            
             <button class="btn-ghost btn-sm" onclick="resetForm()" style="margin-left:auto">✕ Сброс</button>
           </div>
           <div id="send-msg" style="margin-top:10px;font-size:13px;display:none"></div>
@@ -179,6 +180,7 @@ body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
         <!-- Статус -->
         <div class="card">
           <div class="card-title">Результат</div>
+          <div style="margin-bottom:10px"><button class="btn-ghost btn-sm" onclick="refreshResult()">↻ Обновить результат</button></div>
           <div class="stat-row">
             <span class="stat-key">Статус</span>
             <span class="stat-val" id="r-status">—</span>
@@ -214,7 +216,7 @@ body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
               </tr>
             </thead>
             <tbody id="ch-status-tbody">
-              <tr><td colspan="3" style="color:#8b949e;padding:8px">Загрузка…</td></tr>
+              <tr><td colspan="3" style="color:#8b949e;padding:8px">Нажмите «Обновить каналы»</td></tr>
             </tbody>
           </table>
         </div>
@@ -234,189 +236,245 @@ body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
 <div id="toast"></div>
 <script>
 var selectedChannel = null;
+var rowId = 0;
 
 function toast(msg,type,ms){
-  type=type||'ok'; ms=ms||4000;
-  var t=document.getElementById('toast');
-  t.textContent=msg; t.className='show '+type;
+  type = type || 'ok';
+  ms = ms || 4000;
+  var t = document.getElementById('toast');
+  if(!t) return;
+  t.textContent = msg;
+  t.className = 'show ' + type;
   clearTimeout(t._tid);
-  t._tid=setTimeout(function(){t.className=type;},ms);
+  t._tid = setTimeout(function(){ t.className = type; }, ms);
 }
-function fmt(v){ return (v===undefined||v===null||v==='')?'—':String(v); }
 
-/* ── Каналы из /api/channels ── */
+function fmt(v){
+  return (v === undefined || v === null || v === '') ? '—' : String(v);
+}
+
 function loadChannels(){
-  fetch('/api/channels').then(function(r){return r.json();}).then(function(d){
-    var ch=d.channels||[];
-    // Таблица состояния
-    var tbody=document.getElementById('ch-status-tbody');
-    var rows='';
-    ch.forEach(function(c){
-      var cls=c.status==='ACTIVE'?'ok':c.status==='STANDBY'?'warn':'err';
-      rows+='<tr><td>'+c.name+'</td>'
-           +'<td><span class="badge badge-'+cls+'">'+c.status+'</span></td>'
-           +'<td style="color:#8b949e">'+fmt(c.priority)+'</td></tr>';
-    });
-    tbody.innerHTML=rows||'<tr><td colspan="3" style="color:#8b949e">Нет данных</td></tr>';
+  fetch('/api/channels')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var ch = d.channels || [];
 
-    // Список радио-кнопок выбора канала
-    var list=document.getElementById('ch-list');
-    if(!ch.length){list.innerHTML='<div style="color:#8b949e;font-size:13px">Каналы не найдены</div>';return;}
-    var html='';
-    // Добавляем "авто" вариант
-    var autos=selectedChannel===null?'checked':'';
-    html+='<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:'+(selectedChannel===null?'#0d2040':'transparent')+';border:1px solid '+(selectedChannel===null?'#2dd4bf':'#1e3a5f')+'">'
-         +'<input type="radio" name="ch" value="auto" '+autos+' onchange="selectChannel(null)" style="accent-color:#2dd4bf">'
-         +'<span style="font-size:13px;color:#c9d1d9">Авто (первый активный)</span>'
-         +'</label>';
-    ch.forEach(function(c){
-      var sel=selectedChannel===c.name;
-      var dis=c.status==='DISABLED';
-      var bg=sel?'#0d2040':'transparent';
-      var brd=sel?'#2dd4bf':'#1e3a5f';
-      var col=dis?'#8b949e':'#c9d1d9';
-      html+='<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:'+(dis?'not-allowed':'pointer')+';background:'+bg+';border:1px solid '+brd+'">'
-           +'<input type="radio" name="ch" value="'+c.name+'" '+(sel?'checked':'')+(dis?'disabled':'')
-           +' onchange="selectChannel(''+c.name+'')" style="accent-color:#2dd4bf">'
-           +'<span style="font-size:13px;color:'+col+'">'+c.name+'</span>'
-           +'<span class="badge badge-'+(c.status==='ACTIVE'?'ok':c.status==='STANDBY'?'warn':'err')+'" style="margin-left:auto">'+c.status+'</span>'
-           +'</label>';
+      var tbody = document.getElementById('ch-status-tbody');
+      var rows = '';
+      ch.forEach(function(c){
+        var cls = c.status === 'ACTIVE' ? 'ok' : (c.status === 'STANDBY' ? 'warn' : 'err');
+        rows += '<tr><td>' + c.name + '</td>'
+              + '<td><span class="badge badge-' + cls + '">' + c.status + '</span></td>'
+              + '<td style="color:#8b949e">' + fmt(c.priority) + '</td></tr>';
+      });
+      if(tbody){
+        tbody.innerHTML = rows || '<tr><td colspan="3" style="color:#8b949e">Нет данных</td></tr>';
+      }
+
+      var list = document.getElementById('ch-list');
+      if(!list) return;
+
+      if(!ch.length){
+        list.innerHTML = '<div style="color:#8b949e;font-size:13px">Каналы не найдены</div>';
+        return;
+      }
+
+      var html = '';
+      var autos = selectedChannel === null ? 'checked' : '';
+
+      html += '<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:' + (selectedChannel === null ? '#0d2040' : 'transparent') + ';border:1px solid ' + (selectedChannel === null ? '#2dd4bf' : '#1e3a5f') + '">'
+           +  '<input type="radio" name="ch" value="auto" ' + autos + ' onchange="selectChannel(null)" style="accent-color:#2dd4bf">'
+           +  '<span style="font-size:13px;color:#c9d1d9">Авто (первый активный)</span>'
+           +  '</label>';
+
+      ch.forEach(function(c){
+        var sel = selectedChannel === c.name;
+        var dis = c.status === 'DISABLED';
+        var bg  = sel ? '#0d2040' : 'transparent';
+        var brd = sel ? '#2dd4bf' : '#1e3a5f';
+        var col = dis ? '#8b949e' : '#c9d1d9';
+
+        html += '<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:' + (dis ? 'not-allowed' : 'pointer') + ';background:' + bg + ';border:1px solid ' + brd + '">'
+             +  '<input type="radio" name="ch" value="' + c.name + '" ' + (sel ? 'checked' : '') + ' ' + (dis ? 'disabled' : '') + ' onchange="selectChannel(this.value)" style="accent-color:#2dd4bf">'
+             +  '<span style="font-size:13px;color:' + col + '">' + c.name + '</span>'
+             +  '<span class="badge badge-' + (c.status === 'ACTIVE' ? 'ok' : (c.status === 'STANDBY' ? 'warn' : 'err')) + '" style="margin-left:auto">' + c.status + '</span>'
+             +  '</label>';
+      });
+
+      list.innerHTML = html;
+
+      if(d.eth_ip && document.getElementById('nav-ip')){
+        document.getElementById('nav-ip').textContent = d.eth_ip;
+      }
+    })
+    .catch(function(){
+      toast('Ошибка загрузки каналов', 'err');
     });
-    list.innerHTML=html;
-    // IP
-    if(d.eth_ip) document.getElementById('nav-ip').textContent=d.eth_ip;
-  }).catch(function(){toast('Ошибка загрузки каналов','err');});
 }
 
 function selectChannel(name){
-  selectedChannel=name;
-  loadChannels(); // перерисовываем выделение
+  selectedChannel = (name === null || name === 'auto') ? null : name;
+  updatePreview();
+  loadChannels();
 }
 
-/* ── KV-строки ── */
-var rowId=0;
 function addRow(k,v){
-  k=k||''; v=v||'';
+  k = k || '';
+  v = v || '';
+
   rowId++;
-  var id=rowId;
-  var div=document.createElement('div');
-  div.id='kv-'+id;
-  div.style.cssText='display:flex;gap:6px;align-items:center';
-  div.innerHTML='<input type="text" placeholder="ключ" value="'+k+'" oninput="updatePreview()" style="flex:1;min-width:80px">'
-               +'<input type="text" placeholder="значение" value="'+v+'" oninput="updatePreview()" style="flex:2;min-width:100px">'
-               +'<button onclick="removeRow('+id+')" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:16px;padding:0 4px;flex-shrink:0" title="Удалить">✕</button>';
+  var id = rowId;
+
+  var div = document.createElement('div');
+  div.id = 'kv-' + id;
+  div.style.cssText = 'display:flex;gap:6px;align-items:center';
+  div.innerHTML =
+      '<input type="text" placeholder="ключ" value="' + k + '" oninput="updatePreview()" style="flex:1;min-width:80px">'
+    + '<input type="text" placeholder="значение" value="' + v + '" oninput="updatePreview()" style="flex:2;min-width:100px">'
+    + '<button onclick="removeRow(' + id + ')" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:16px;padding:0 4px;flex-shrink:0" title="Удалить">✕</button>';
+
   document.getElementById('kv-list').appendChild(div);
   updatePreview();
 }
+
 function removeRow(id){
-  var el=document.getElementById('kv-'+id);
+  var el = document.getElementById('kv-' + id);
   if(el) el.remove();
   updatePreview();
 }
+
 function getKV(){
-  var obj={};
-  var rows=document.getElementById('kv-list').querySelectorAll('div[id^="kv-"]');
+  var obj = {};
+  var rows = document.getElementById('kv-list').querySelectorAll('div[id^="kv-"]');
+
   rows.forEach(function(row){
-    var inputs=row.querySelectorAll('input');
-    var k=inputs[0].value.trim();
-    var v=inputs[1].value.trim();
+    var inputs = row.querySelectorAll('input');
+    var k = inputs[0].value.trim();
+    var v = inputs[1].value.trim();
+
     if(!k) return;
-    var n=parseFloat(v);
-    obj[k]=(v!==''&&!isNaN(n))?n:v;
+
+    var n = parseFloat(v);
+    obj[k] = (v !== '' && !isNaN(n)) ? n : v;
   });
+
   return obj;
 }
+
 function updatePreview(){
-  var kv=getKV();
-  var payload={};
-  if(selectedChannel) payload.channel=selectedChannel;
-  payload.values=kv;
-  document.getElementById('json-preview').textContent=JSON.stringify(payload,null,2);
+  var kv = getKV();
+  var payload = {};
+
+  if(selectedChannel) payload.channel = selectedChannel;
+  payload.values = kv;
+
+  document.getElementById('json-preview').textContent = JSON.stringify(payload, null, 2);
 }
 
 function resetForm(){
-  selectedChannel=null;
-  document.getElementById('kv-list').innerHTML='';
-  rowId=0;
+  selectedChannel = null;
+  document.getElementById('kv-list').innerHTML = '';
+  rowId = 0;
+  addRow('temperature','23.5');
+  addRow('pressure','1013.2');
   updatePreview();
-  loadChannels();
-  document.getElementById('send-msg').style.display='none';
+  document.getElementById('send-msg').style.display = 'none';
 }
 
-/* ── Отправка ── */
 function doSend(){
-  var kv=getKV();
-  var btn=document.getElementById('btn-send');
-  btn.disabled=true; btn.textContent='Отправка…';
-  var msg=document.getElementById('send-msg');
-  msg.style.display='none';
+  var kv = getKV();
+  var btn = document.getElementById('btn-send');
+  var msg = document.getElementById('send-msg');
 
-  // POST /api/test_send — тело JSON с выбранным каналом и значениями
-  // Если бэкенд ещё не поддерживает параметры — отправим всё равно (triggerTestSend() сработает)
-  var body=JSON.stringify({
-    channel: selectedChannel||'auto',
-    values:  kv
+  btn.disabled = true;
+  btn.textContent = 'Отправка…';
+  msg.style.display = 'none';
+
+  var body = JSON.stringify({
+    channel: selectedChannel || 'auto',
+    values: kv
   });
 
   fetch('/api/test_send', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
     body: body
-  }).then(function(r){return r.json();}).then(function(d){
-    btn.disabled=false; btn.textContent='▶ Отправить';
-    if(d.ok||d.status==='pending'||d.status==='sending'){
-      toast('Тест запущен','ok');
-      msg.style.cssText='display:block;color:#2dd4bf;font-size:13px';
-      msg.textContent='✓ Команда принята. Ожидайте результат…';
-      // Начинаем поллинг результата каждые 2 сек
-      var t=setInterval(function(){
-        pollResult(function(done){ if(done) clearInterval(t); });
-      },2000);
-      setTimeout(function(){clearInterval(t);},30000);
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    btn.disabled = false;
+    btn.textContent = '▶ Отправить';
+
+    if(d.ok || d.status === 'pending' || d.status === 'sending'){
+      toast('Тест запущен', 'ok');
+      msg.style.cssText = 'display:block;color:#2dd4bf;font-size:13px';
+      msg.textContent = '✓ Команда принята. Ожидайте результат…';
     }
-  }).catch(function(){
-    btn.disabled=false; btn.textContent='▶ Отправить';
-    toast('Ошибка связи с устройством','err');
-    msg.style.cssText='display:block;color:#f87171;font-size:13px';
-    msg.textContent='✗ Нет связи с устройством';
+  })
+  .catch(function(){
+    btn.disabled = false;
+    btn.textContent = '▶ Отправить';
+    toast('Ошибка связи с устройством', 'err');
+    msg.style.cssText = 'display:block;color:#f87171;font-size:13px';
+    msg.textContent = '✗ Нет связи с устройством';
   });
 }
 
-/* ── Результат ── */
 function pollResult(cb){
-  fetch('/api/test_result').then(function(r){return r.json();}).then(function(d){
-    document.getElementById('r-status').textContent  = fmt(d.status);
-    document.getElementById('r-channel').textContent = fmt(d.channel);
-    document.getElementById('r-http').textContent    = d.http_code||'—';
-    document.getElementById('r-elapsed').textContent = d.elapsed_ms?d.elapsed_ms+' ms':'—';
-    var badge=document.getElementById('result-badge');
-    var done=false;
-    if(d.status==='success'){
-      badge.style.cssText='display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;background:#1a3a2e;color:#2dd4bf';
-      badge.textContent='✓ Успешно';
-      done=true;
-    } else if(d.status==='fail'){
-      badge.style.cssText='display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;background:#3a1a1a;color:#f87171';
-      badge.textContent='✗ Ошибка';
-      done=true;
-    } else if(d.status&&d.status!=='idle'){
-      badge.style.cssText='display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;background:#2a2200;color:#e3b341';
-      badge.textContent='⏳ '+d.status;
-    } else {
-      badge.style.cssText='display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;background:#1c2535;color:#8b949e';
-      badge.textContent='Нет данных';
-    }
-    if(cb) cb(done);
-  }).catch(function(){});
+  fetch('/api/test_result')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      document.getElementById('r-status').textContent  = fmt(d.status);
+      document.getElementById('r-channel').textContent = fmt(d.channel);
+      document.getElementById('r-http').textContent    = d.http_code || '—';
+      document.getElementById('r-elapsed').textContent = d.elapsed_ms ? (d.elapsed_ms + ' ms') : '—';
+
+      var badge = document.getElementById('result-badge');
+      var done = false;
+
+      if(d.status === 'success'){
+        badge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;background:#1a3a2e;color:#2dd4bf';
+        badge.textContent = '✓ Успешно';
+        done = true;
+      } else if(d.status === 'fail'){
+        badge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;background:#3a1a1a;color:#f87171';
+        badge.textContent = '✗ Ошибка';
+        done = true;
+      } else if(d.status && d.status !== 'idle'){
+        badge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;background:#2a2200;color:#e3b341';
+        badge.textContent = '⏳ ' + d.status;
+      } else {
+        badge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:600;background:#1c2535;color:#8b949e';
+        badge.textContent = 'Нет данных';
+      }
+
+      if(cb) cb(done);
+    })
+    .catch(function(){});
+}
+
+function refreshChannels(){
+  var list = document.getElementById('ch-list');
+  var tbody = document.getElementById('ch-status-tbody');
+
+  if(list) list.innerHTML = '<div style="color:#8b949e;font-size:13px">Загрузка каналов…</div>';
+  if(tbody) tbody.innerHTML = '<tr><td colspan="3" style="color:#8b949e">Загрузка…</td></tr>';
+
+  setTimeout(loadChannels, 150);
+}
+
+function refreshResult(){
+  setTimeout(function(){ pollResult(); }, 150);
 }
 
 /* ── Инициализация ── */
-loadChannels();
-pollResult();
 addRow('temperature','23.5');
 addRow('pressure','1013.2');
 updatePreview();
-setInterval(loadChannels, 15000);
+
+window.addEventListener('load', function(){
+  // Не запускаем fetch автоматически при загрузке страницы.
+});
 </script>
 </body>
 </html>

@@ -33,15 +33,15 @@ static constexpr uint8_t MAX_RTU_PORTS = 3;
 /**
  * @brief Selects the telemetry transmission protocol.
  *
- * @note HTTPS_THINGSBOARD was previously named HTTPS (value 0).
+ * @note HTTPS_GENERIC (value 0) — generic HTTPS for any server. Backward-compatible JSON storage.
  *       Numeric values are preserved for backward-compatible JSON/EEPROM
  *       storage.
  */
 enum class ProtocolMode : uint8_t {
-    HTTPS_THINGSBOARD = 0, ///< ThingsBoard cloud via HTTPS REST
+    HTTPS_GENERIC    = 0, ///< Generic HTTPS POST to any server
     MQTT_GENERIC      = 1, ///< Generic MQTT broker
     WEBHOOK_HTTP      = 2, ///< Arbitrary HTTP webhook
-    MQTT_THINGSBOARD  = 3  ///< ThingsBoard cloud via MQTT
+    MQTT_THINGSBOARD  = 3  ///< MQTT with TB-style topic (legacy)
 };
 
 // ================================================================
@@ -154,9 +154,9 @@ struct WebConfig {
  *        the @p mode field.
  */
 struct ProtocolConfig {
-    ProtocolMode mode = ProtocolMode::HTTPS_THINGSBOARD; ///< Active protocol
+    ProtocolMode mode = ProtocolMode::HTTPS_GENERIC;    ///< Active protocol
 
-    // --- MQTT broker (MQTT_GENERIC and MQTT_THINGSBOARD) ---
+    // --- MQTT broker settings ---
     char     mqtt_host[64]  = "";                          ///< Broker hostname or IP
     uint16_t mqtt_port      = 1883;                        ///< Broker TCP port
     char     mqtt_user[32]  = "";                          ///< MQTT username (empty = anonymous)
@@ -165,10 +165,16 @@ struct ProtocolConfig {
     uint8_t  mqtt_qos       = 1;                           ///< QoS level: 0, 1, or 2
     bool     mqtt_tls       = false;                       ///< Enable TLS for MQTT connection
 
-    // --- ThingsBoard HTTPS (HTTPS_THINGSBOARD) ---
-    char     tb_host[64]   = "thingsboard.cloud"; ///< ThingsBoard server hostname
-    char     tb_token[64]  = "";                  ///< Device access token
-    uint16_t tb_port       = 443;                 ///< ThingsBoard HTTPS port
+    // --- Universal HTTPS server ---
+    char     server_host[64]  = "";             ///< Hostname, e.g. "monset.ru"
+    char     server_token[128]= "";             ///< Auth token (X-Device-Token header)
+    char     server_path[128] = "/api/ingest";  ///< URL path
+    uint16_t server_port      = 443;            ///< TCP port
+
+    // --- Legacy server aliases (backward compat) ---
+    char     tb_host[64]   = "";  ///< @deprecated use server_host
+    char     tb_token[64]  = "";  ///< @deprecated use server_token
+    uint16_t tb_port       = 443; ///< @deprecated use server_port
 
     // --- Webhook (WEBHOOK_HTTP) ---
     char     webhook_url[128]  = "";     ///< Full URL for the webhook endpoint
@@ -406,7 +412,7 @@ struct RuntimeConfig
     bool     mqtt_tls       = false; ///< Enable TLS (legacy)
 
     // --- Protocol selection (legacy flat field) ---
-    ProtocolMode protocol = ProtocolMode::HTTPS_THINGSBOARD; ///< Active protocol (legacy)
+    ProtocolMode protocol = ProtocolMode::HTTPS_GENERIC;    ///< Active protocol (legacy)
 
     // --- HTTP Webhook (legacy flat fields) ---
     char           webhook_url[192]              {}; ///< Webhook endpoint URL (legacy)
@@ -488,6 +494,10 @@ struct RuntimeConfig
 
     /// @brief Log all current configuration parameters via the debug UART.
     void log() const;
+
+    /// @brief Build the effective HTTPS URL from server_host/server_path/server_port
+    ///        or fall back to legacy server_url if set.
+    void buildServerUrl(char* out, size_t outSz) const;
 };
 
 /// @brief Access the singleton RuntimeConfig instance.

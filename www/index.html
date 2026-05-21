@@ -331,7 +331,7 @@ function pollChannels(){
 function pollConfig(){
   fetch('/api/config').then(function(r){return r.json();}).then(function(d){
     // конфиг блок
-    var protoMap={'https_tb':'HTTPS ThingsBoard','mqtt_tb':'MQTT ThingsBoard',
+    var protoMap={'https_generic':'HTTPS (универсальный)','https_tb':'HTTPS (legacy)','mqtt_tb':'MQTT (TB legacy)',
       'mqtt_gen':'MQTT Generic','webhook':'HTTP Webhook'};
     document.getElementById('c-proto').textContent  = protoMap[d.proto||d.protocol]||fmt(d.proto||d.protocol);
     document.getElementById('c-server').textContent = fmt(d.server_url||d.tb_host||d.mqtt_host||d.webhook_url);

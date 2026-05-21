@@ -179,6 +179,7 @@ private:
      * @brief Execute test send synchronously (called when m_testState==Reading).
      */
     void runTestSend();
+    void processTestSend();
 
     // ---- LED ----
     void ledOn();

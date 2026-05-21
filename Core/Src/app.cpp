@@ -352,10 +352,13 @@ int App::postViaEth(const char* json,uint16_t len) {
     const RuntimeConfig& c=Cfg();
     if((c.protocol==ProtocolMode::MQTT_GENERIC||c.protocol==ProtocolMode::MQTT_THINGSBOARD)&&c.mqtt_host[0])
         return sendViaMqtt(json,len)?200:-1;
-    if(startsWith(c.server_url,"https://"))
-        return HttpsW5500::postJson(c.server_url,c.server_auth_b64,json,len,Config::HTTPS_POST_TIMEOUT_MS);
-    if(startsWith(c.server_url,"http://"))
-        return httpPostPlainW5500(c.server_url,c.server_auth_b64,json,len,Config::HTTP_POST_TIMEOUT_MS);
+    char url[192]{};
+    c.buildServerUrl(url, sizeof(url));
+    const char* auth = c.server_auth_b64[0] ? c.server_auth_b64 : nullptr;
+    if(startsWith(url,"https://"))
+        return HttpsW5500::postJson(url, auth, json, len, Config::HTTPS_POST_TIMEOUT_MS);
+    if(startsWith(url,"http://"))
+        return httpPostPlainW5500(url, auth, json, len, Config::HTTP_POST_TIMEOUT_MS);
     return -1;
 }
 int App::postViaGsm(const char* json,uint16_t len) {
@@ -365,12 +368,16 @@ int App::postViaGsm(const char* json,uint16_t len) {
     if((c.protocol==ProtocolMode::MQTT_GENERIC||c.protocol==ProtocolMode::MQTT_THINGSBOARD)&&c.mqtt_host[0]){
         if(!m_mqtt.isConnected()) m_mqtt.mqttConnect(MqttBackend::GSM);
         if(m_mqtt.publish(nullptr,json,len)) code=200;
-    } else if(startsWith(c.server_url,"https://")) {
-        A7670CTls tls(m_gsm);
-        if(c.tls_ca_cert[0]) tls.setCaCert(c.tls_ca_cert);
-        code=(int)tls.httpsPost(c.server_url,json,len);
     } else {
-        code=(int)m_gsm.httpPost(c.server_url,json,len);
+        char url[192]{};
+        c.buildServerUrl(url, sizeof(url));
+        if(startsWith(url,"https://")) {
+            A7670CTls tls(m_gsm);
+            if(c.tls_ca_cert[0]) tls.setCaCert(c.tls_ca_cert);
+            code=(int)tls.httpsPost(url,json,len);
+        } else {
+            code=(int)m_gsm.httpPost(url,json,len);
+        }
     }
     m_gsm.disconnect(); m_gsm.powerOff(); return code;
 }
@@ -603,6 +610,7 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
 
         // FIX: проверяем таймаут веб-бездействия
         checkWebTimeout();
+                processTestSend();
 
         // Backup retransmit
         // FIX: проверяем только isMounted() — m_sdOk может быть false
@@ -636,6 +644,7 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
                 if (m_webServer.isRunning()) m_webServer.tick();
                 g_web_exclusive = m_webActive;
                 checkWebTimeout();
+                processTestSend();
                 IWDG->KR = 0xAAAA;
                 HAL_Delay(5); // 200 запросов/сек — мгновенный отклик
                 if (!m_webActive) {
@@ -661,6 +670,7 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
                 if (eth.ready()) eth.tick();
                 if (m_webServer.isRunning()) m_webServer.tick();
                 checkWebTimeout();
+                processTestSend();
                 IWDG->KR = 0xAAAAU;
                 // Выходим немедленно при входящем TCP-соединении (до первого запроса)
                 // или когда браузер уже активен (m_webActive выставлен handleRequest)

@@ -91,7 +91,7 @@ constexpr float    SENSOR_ZERO_LEVEL      = 0.0f;
 constexpr float    SENSOR_DIVIDER         = 1000.0f;
 
 // ================================================================
-// ID метрик (ThingsBoard)
+// ID метрик (телеметрия)
 // ================================================================
 constexpr const char* METRIC_ID           = "f2656f53-463c-4d66-8ab1-e86fb11549b1";
 constexpr const char* COMPLEX_ID          = "21100e69-b08b-45d1-ab1f-0adca0f0f909";
@@ -123,7 +123,7 @@ constexpr uint16_t GSM_RX_BUF_SIZE        = 512;
 // Сервер (значения по умолчанию; перекрываются runtime_config)
 // ================================================================
 constexpr const char* SERVER_URL           =
-    "https://thingsboard.cloud/api/v1/6Wv356bm51LxD2vrF22S/telemetry";
+    "";  ///< Default server URL (empty — use server_host/server_path in runtime_config)
 constexpr const char* SERVER_AUTH          = "";
 
 // ================================================================

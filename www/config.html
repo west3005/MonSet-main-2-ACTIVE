@@ -147,8 +147,8 @@ body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
 </div></div></details>
 <details><summary>B: Протокол и сервер</summary><div class="sc">
 <div class="f" style="max-width:260px;margin-bottom:10px"><label>Протокол</label>
-<select id="proto" onchange="sp(this.value)"><option value="https_tb">HTTPS ThingsBoard</option><option value="mqtt_gen">MQTT (Generic)</option><option value="mqtt_tb">MQTT ThingsBoard</option><option value="webhook">HTTP Webhook</option></select></div>
-<div id="g_tb"><div class="r"><div class="f"><label>Хост TB</label><input type="text" id="tb_host" onchange="c('tb_host',this.value)"></div><div class="f"><label>Токен</label><input type="text" id="tb_token" onchange="c('tb_token',this.value)"></div><div class="f" style="max-width:90px"><label>Порт</label><input type="number" id="tb_port" value="443" onchange="c('tb_port',+this.value)"></div></div></div>
+<select id="proto" onchange="sp(this.value)"><option value="https_generic">HTTPS (любой сервер)</option><option value="https_tb">HTTPS (legacy)</option><option value="mqtt_gen">MQTT (Generic)</option><option value="mqtt_tb">MQTT (TB legacy)</option><option value="webhook">HTTP Webhook</option></select></div>
+<div id="g_tb"><div class="r"><div class="f"><label>Хост сервера</label><input type="text" id="server_host" placeholder="monset.ru" onchange="c('server_host',this.value)"></div><div class="f"><label>Токен (X-Device-Token)</label><input type="text" id="server_token" onchange="c('server_token',this.value)"></div><div class="f"><label>Путь</label><input type="text" id="server_path" value="/api/ingest" onchange="c('server_path',this.value)"></div><div class="f" style="max-width:90px"><label>Порт</label><input type="number" id="server_port" value="443" onchange="c('server_port',+this.value)"></div></div><!-- legacy hidden --><input type="hidden" id="tb_host"><input type="hidden" id="tb_token"><input type="hidden" id="tb_port" value="443"></div>
 <div id="g_mqtt" style="display:none"><div class="r"><div class="f"><label>MQTT Хост</label><input type="text" id="mqtt_host" onchange="c('mqtt_host',this.value)"></div><div class="f" style="max-width:90px"><label>Порт</label><input type="number" id="mqtt_port" value="1883" onchange="c('mqtt_port',+this.value)"></div></div>
 <div class="r"><div class="f"><label>Пользователь</label><input type="text" id="mqtt_user" onchange="c('mqtt_user',this.value)"></div><div class="f"><label>Пароль</label><input type="password" id="mqtt_pass" onchange="c('mqtt_pass',this.value)"></div></div>
 <div class="r"><div class="f"><label>Топик</label><input type="text" id="mqtt_topic" onchange="c('mqtt_topic',this.value)"></div><div class="f" style="max-width:80px"><label>QoS</label><select id="mqtt_qos" onchange="c('mqtt_qos',+this.value)"><option>0</option><option>1</option><option>2</option></select></div><div class="tg" style="margin-top:16px"><input type="checkbox" id="mqtt_tls" onchange="c('mqtt_tls',this.checked)"><span>TLS</span></div></div></div>
@@ -215,7 +215,7 @@ function c(k,v){cfg[k]=v}
 function sh(id,v){document.getElementById(id).style.display=v?'flex':'none'}
 
 function sp(v){
-  document.getElementById('g_tb').style.display=(v==='https_tb'||v==='mqtt_tb')?'block':'none';
+  document.getElementById('g_tb').style.display=(v==='https_generic'||v==='https_tb'||v==='mqtt_tb')?'block':'none';
   document.getElementById('g_mqtt').style.display=(v==='mqtt_gen'||v==='mqtt_tb')?'block':'none';
   document.getElementById('g_wh').style.display=(v==='webhook')?'block':'none';
   cfg.proto=v;
@@ -357,7 +357,7 @@ function reloadCfg(){
             'alert_on_sensor_fail','mqtt_tls','eth_dhcp'];
     bk.forEach(function(k){var e=document.getElementById(k);if(e)e.checked=!!d[k]});
     // text/number inputs + password inputs
-    var tx=['tb_host','tb_token','tb_port','mqtt_host','mqtt_port','mqtt_user','mqtt_topic',
+    var tx=['server_host','server_token','server_path','server_port','tb_host','tb_token','tb_port','mqtt_host','mqtt_port','mqtt_user','mqtt_topic',
             'mqtt_pass','webhook_url','poll_interval_s','send_interval_s','backup_retry_s',
             'avg_count','deep_sleep_s','schedule_start','schedule_stop','sl_port','sl_uid',
             'sl_sock','sl_ctms','eth_ip','eth_sn','eth_gw','eth_dns','gsm_apn','gsm_user',
@@ -370,6 +370,16 @@ function reloadCfg(){
       var e=document.getElementById(k);if(e&&d[k]!==undefined)e.value=d[k];
     });
     if(d.proto){var ep=document.getElementById('proto');if(ep)ep.value=d.proto;sp(d.proto);}
+    // Backward compat: если server_host пустой — берём из tb_host/tb_token
+    var _sh=document.getElementById('server_host');
+    var _th=document.getElementById('tb_host');
+    if(_sh&&_th&&!_sh.value&&_th.value){_sh.value=_th.value;}
+    var _st=document.getElementById('server_token');
+    var _tt=document.getElementById('tb_token');
+    if(_st&&_tt&&!_st.value&&_tt.value){_st.value=_tt.value;}
+    // Sync hidden tb_host/tb_token from server_ fields for legacy save
+    if(_th&&_sh)_th.value=_sh.value;
+    if(_tt&&_st)_tt.value=_st.value;
     if(d.chain_order){cord=d.chain_order;coen=d.co_en||coen;rndOrd()}
     if(d.tcp_devs){tcpd=d.tcp_devs;rndTD()}
     if(d.regs){regs=(d.sl_regs||d.regs||[]).map(function(r){return{ad:r.ad||0,src:(typeof r.si==='number'&&r.si>=0&&r.si<SRC.length)?SRC[r.si]:(r.src||SRC[0]),dt:r.dt||'INT16',sc:(r.sc||1),un:(r.un||''),nm:(r.nm||'')}});rndRegs()}
@@ -388,12 +398,12 @@ function save(){
           'alert_on_sensor_fail','mqtt_tls','eth_dhcp'];
   bk.forEach(function(k){var e=document.getElementById(k);if(e)cfg[k]=e.checked});
   // text/number/password inputs
-  var tx=['tb_host','tb_token','mqtt_host','mqtt_user','mqtt_topic',
+  var tx=['server_host','server_token','server_path','tb_host','tb_token','mqtt_host','mqtt_user','mqtt_topic',
           'mqtt_pass','webhook_url','schedule_start','schedule_stop','eth_ip','eth_sn',
           'eth_gw','eth_dns','gsm_apn','gsm_user','gsm_pass','wifi_ssid','wifi_pass',
           'ntp_server','web_user','web_pass','alert_webhook_url'];
   tx.forEach(function(k){var e=document.getElementById(k);if(e)cfg[k]=e.value});
-  var ni=['tb_port','mqtt_port','poll_interval_s','send_interval_s','backup_retry_s',
+  var ni=['server_port','tb_port','mqtt_port','poll_interval_s','send_interval_s','backup_retry_s',
           'avg_count','deep_sleep_s','sl_port','sl_uid','sl_sock','sl_ctms',
           'web_port','web_idle_timeout_s','batt_low','channel_timeout_s',
           'channel_retry_s','channel_max_retries'];
@@ -405,7 +415,17 @@ function save(){
   ['mqtt_qos','tz_off'].forEach(function(k){
     var e=document.getElementById(k);if(e)cfg[k]=parseInt(e.value,10)||0;
   });
-  var sl_regs=regs.map(function(r){return{ad:r.ad,si:SRC.indexOf(r.src)<0?0:SRC.indexOf(r.src),dt:r.dt,sc:r.sc,un:r.un,nm:r.nm}});var out=Object.assign({},cfg,{rtu:rtu,tcp_devs:tcpd,regs:regs,sl_regs:sl_regs,chain_order:cord,co_en:coen});
+  var sl_regs=regs.map(function(r){return{ad:r.ad,si:SRC.indexOf(r.src)<0?0:SRC.indexOf(r.src),dt:r.dt,sc:r.sc,un:r.un,nm:r.nm}});
+  // Sync generic server fields into legacy aliases BEFORE payload build.
+  var _shv=document.getElementById('server_host');var _thv=document.getElementById('tb_host');
+  if(_shv&&_thv){cfg.tb_host=_shv.value;_thv.value=_shv.value; cfg.server_host=_shv.value;}
+  var _stv=document.getElementById('server_token');var _ttv=document.getElementById('tb_token');
+  if(_stv&&_ttv){cfg.tb_token=_stv.value;_ttv.value=_stv.value; cfg.server_token=_stv.value;}
+  var _spv=document.getElementById('server_path'); if(_spv){cfg.server_path=_spv.value;}
+  var _srvp=document.getElementById('server_port'); if(_srvp){cfg.server_port=parseInt(_srvp.value,10)||443; cfg.tb_port=cfg.server_port;}
+  // Keep server_url empty so firmware builds URL from host/path/port.
+  cfg.server_url='';
+  var out=Object.assign({},cfg,{rtu:rtu,tcp_devs:tcpd,regs:regs,sl_regs:sl_regs,chain_order:cord,co_en:coen});
   fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(out)})
     .then(function(r){return r.json().then(function(d){
       if(r.ok && d.saved_to_sd) showMsg(true,'✓ Сохранено на SD');

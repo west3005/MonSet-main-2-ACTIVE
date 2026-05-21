@@ -161,7 +161,7 @@ bool CaptivePortal::parseFormData(const char* body) {
     // Protocol mode
     if (getFormField(body, "protocol", tmp, sizeof(tmp))) {
         if (std::strcmp(tmp, "mqtt") == 0) c.protocol = ProtocolMode::MQTT_GENERIC;
-        else c.protocol = ProtocolMode::HTTPS_THINGSBOARD;
+        else c.protocol = ProtocolMode::HTTPS_GENERIC;
     }
 
     // Enable WiFi channel if WiFi configured

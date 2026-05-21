@@ -1,3 +1,5 @@
+extern volatile bool g_web_exclusive;
+
 /**
  * @file    app_web.cpp
  * @brief   App web exclusive mode and test-send implementation.
@@ -117,7 +119,10 @@ void App::runTestSend() {
     std::strncpy(m_testChannel, "eth", sizeof(m_testChannel) - 1);
     m_testChannel[sizeof(m_testChannel) - 1] = '\0';
 
+    bool prevWebExclusive = g_web_exclusive;
+    g_web_exclusive = false;
     SendResult result = m_channelMgr.sendData(payload, (uint16_t)plen);
+    g_web_exclusive = prevWebExclusive;
     m_testElapsedMs = (uint32_t)(HAL_GetTick() - start);
 
     // Map SendResult to HTTP-style code for the caller
@@ -133,5 +138,16 @@ void App::runTestSend() {
         DBG.warn("[TEST] fail, result=%d", (int)result);
         CircularLogBuffer::instance().writef("WARN", "TEST: fail result=%d [%lu ms]",
                                               (int)result, (unsigned long)m_testElapsedMs);
+    }
+}
+
+
+// ============================================================================
+// processTestSend — call periodically from main loop
+// ============================================================================
+void App::processTestSend() {
+    if (m_testState == TestSendState::Reading) {
+        DBG.info("[TEST] starting runTestSend() from processTestSend");
+        runTestSend();
     }
 }
