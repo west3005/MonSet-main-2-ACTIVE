@@ -4145,6 +4145,7 @@ void WebServer::handleApiConfig(uint8_t sn){
     // Protocol string
     const char* protoStr =
         (c.protocol==ProtocolMode::HTTPS_GENERIC)    ?"https_generic":
+        (c.protocol==ProtocolMode::OCEAN_MONITOR)    ?"ocean_monitor":
         (c.protocol==ProtocolMode::MQTT_THINGSBOARD) ?"mqtt_tb"      :
         (c.protocol==ProtocolMode::MQTT_GENERIC)     ?"mqtt_gen"     :
         (c.protocol==ProtocolMode::WEBHOOK_HTTP)     ?"webhook"      :"https_generic";
@@ -4225,7 +4226,10 @@ void WebServer::handleApiConfig(uint8_t sn){
         // alerts
         "\"alerts_enabled\":%s,\"batt_low\":%.1f,"
         "\"alert_on_channel_fail\":%s,\"alert_on_sensor_fail\":%s,"
-        "\"alert_webhook_url\":\"%s\""
+        "\"alert_webhook_url\":\"%s\","
+        "\"ocean_host\":\"%s\",\"ocean_path\":\"%s\",\"ocean_port\":%u,"
+        "\"ocean_username\":\"%s\",\"ocean_password\":\"%s\","
+        "\"ocean_metric_id\":\"%s\""
         "",
         c.server_url,
         (unsigned long)c.poll_interval_sec,(unsigned long)c.send_interval_polls,
@@ -4257,7 +4261,11 @@ void WebServer::handleApiConfig(uint8_t sn){
         c.alerts.alerts_enabled?"true":"false",(double)bat_low,
         c.alerts.alert_on_channel_fail?"true":"false",
         c.alerts.alert_on_sensor_fail?"true":"false",
-        c.alerts.alert_webhook_url
+        c.alerts.alert_webhook_url,
+        // ocean_monitor fields
+        c.proto.ocean_host, c.proto.ocean_path, (unsigned)c.proto.ocean_port,
+        c.proto.ocean_username, c.proto.ocean_password,
+        c.proto.ocean_metric_id
     );
 
     // co_en array

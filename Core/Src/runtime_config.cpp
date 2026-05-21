@@ -658,6 +658,7 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
           else if (std::strcmp(pv,"mqtt_tb")      ==0) { tmp.protocol=ProtocolMode::MQTT_THINGSBOARD; tmp.proto.mode=ProtocolMode::MQTT_THINGSBOARD; }
           else if (std::strcmp(pv,"mqtt_gen")     ==0) { tmp.protocol=ProtocolMode::MQTT_GENERIC;     tmp.proto.mode=ProtocolMode::MQTT_GENERIC;     }
           else if (std::strcmp(pv,"webhook")      ==0) { tmp.protocol=ProtocolMode::WEBHOOK_HTTP;     tmp.proto.mode=ProtocolMode::WEBHOOK_HTTP;     }
+          else if (std::strcmp(pv,"ocean_monitor")==0) { tmp.protocol=ProtocolMode::OCEAN_MONITOR;   tmp.proto.mode=ProtocolMode::OCEAN_MONITOR;   }
       } }
 
     // Legacy server aliases: tb_host / tb_token / tb_port (backward compat)
@@ -679,6 +680,20 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
       if (jsonGetU16(json,"server_port",v16) && v16>0) tmp.proto.server_port = v16; }
 
     // Backward compat: tb_host/tb_token -> server_host/server_token if server_host not set
+    // Ocean Monitor fields
+    { char s[128]{};
+      if (jsonGetString(json,"ocean_host",     s,sizeof(s))) copyStr(tmp.proto.ocean_host,      sizeof(tmp.proto.ocean_host),      s); }
+    { char s[128]{};
+      if (jsonGetString(json,"ocean_path",     s,sizeof(s))) copyStr(tmp.proto.ocean_path,      sizeof(tmp.proto.ocean_path),      s); }
+    { uint16_t v16=0;
+      if (jsonGetU16   (json,"ocean_port",     v16) && v16>0) tmp.proto.ocean_port = v16; }
+    { char s[64]{};
+      if (jsonGetString(json,"ocean_username", s,sizeof(s))) copyStr(tmp.proto.ocean_username,  sizeof(tmp.proto.ocean_username),  s); }
+    { char s[64]{};
+      if (jsonGetString(json,"ocean_password", s,sizeof(s))) copyStr(tmp.proto.ocean_password,  sizeof(tmp.proto.ocean_password),  s); }
+    { char s[64]{};
+      if (jsonGetString(json,"ocean_metric_id",s,sizeof(s))) copyStr(tmp.proto.ocean_metric_id, sizeof(tmp.proto.ocean_metric_id), s); }
+
     if (tmp.proto.tb_host[0] && !tmp.proto.server_host[0])
         copyStr(tmp.proto.server_host, sizeof(tmp.proto.server_host), tmp.proto.tb_host);
     normalizeHost(tmp.proto.tb_host, sizeof(tmp.proto.tb_host));
@@ -1090,6 +1105,7 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
         if      (proto.mode==ProtocolMode::MQTT_GENERIC)     protoStr = "mqtt_gen";
         else if (proto.mode==ProtocolMode::MQTT_THINGSBOARD) protoStr = "mqtt_tb";
         else if (proto.mode==ProtocolMode::WEBHOOK_HTTP)     protoStr = "webhook";
+        else if (proto.mode==ProtocolMode::OCEAN_MONITOR)    protoStr = "ocean_monitor";
 
         n += std::snprintf(json+n,sizeof(json)-n,
             "\"proto\":\"%s\","
@@ -1133,7 +1149,13 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
             "\"sl_port\":%u,"
             "\"sl_uid\":%u,"
             "\"sl_sock\":%u,"
-            "\"sl_ctms\":%u"
+            "\"sl_ctms\":%u,"
+            "\"ocean_host\":\"%s\","
+            "\"ocean_path\":\"%s\","
+            "\"ocean_port\":%u,"
+            "\"ocean_username\":\"%s\","
+            "\"ocean_password\":\"%s\","
+            "\"ocean_metric_id\":\"%s\""
             "}\n",
             protoStr,
             proto.server_host, proto.server_token, proto.server_path, (unsigned)proto.server_port,
@@ -1166,7 +1188,9 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
             (unsigned)tcp_slave.listen_port,
             (unsigned)tcp_slave.unit_id,
             (unsigned)tcp_slave.w5500_socket,
-            (unsigned)tcp_slave.connection_timeout_ms);
+            (unsigned)tcp_slave.connection_timeout_ms,
+            proto.ocean_host, proto.ocean_path, (unsigned)proto.ocean_port,
+            proto.ocean_username, proto.ocean_password, proto.ocean_metric_id);
     }
     if (n<=0||n>=(int)sizeof(json)) goto overflow;
 

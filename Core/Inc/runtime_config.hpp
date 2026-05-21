@@ -41,7 +41,8 @@ enum class ProtocolMode : uint8_t {
     HTTPS_GENERIC    = 0, ///< Generic HTTPS POST to any server
     MQTT_GENERIC      = 1, ///< Generic MQTT broker
     WEBHOOK_HTTP      = 2, ///< Arbitrary HTTP webhook
-    MQTT_THINGSBOARD  = 3  ///< MQTT with TB-style topic (legacy)
+    MQTT_THINGSBOARD  = 3, ///< MQTT with TB-style topic (legacy)
+    OCEAN_MONITOR     = 4  ///< ocean-monitor.ru REST API (/api/rest/measures)
 };
 
 // ================================================================
@@ -179,6 +180,14 @@ struct ProtocolConfig {
     // --- Webhook (WEBHOOK_HTTP) ---
     char     webhook_url[128]  = "";     ///< Full URL for the webhook endpoint
     char     webhook_method[8] = "POST"; ///< HTTP method: GET or POST
+
+    // --- Ocean Monitor (OCEAN_MONITOR) ---
+    char     ocean_host[64]      = "ocean-monitor.ru";      ///< Hostname
+    char     ocean_path[128]     = "/api/rest/measures";    ///< URL path
+    uint16_t ocean_port          = 443;                     ///< TCP port
+    char     ocean_username[64]  = "";                      ///< Basic auth username (in body)
+    char     ocean_password[64]  = "";                      ///< Basic auth password (in body)
+    char     ocean_metric_id[64] = "";                      ///< Metric UUID sent in payload
 };
 
 // ================================================================
