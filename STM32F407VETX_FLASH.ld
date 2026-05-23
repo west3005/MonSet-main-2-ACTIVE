@@ -39,7 +39,7 @@ ENTRY(Reset_Handler)
 /* Highest address of the user mode stack */
 _estack = ORIGIN(RAM) + LENGTH(RAM); /* end of "RAM" Ram type memory */
 
-_Min_Heap_Size = 0xA000;    /* 40KB heap: required for mbedTLS ssl_setup (2x ~9.5KB buffers) */
+_Min_Heap_Size = 0x8000;    /* 32KB heap: mbedTLS needs ~18KB, 32KB with margin */
 _Min_Stack_Size = 0x2000;    /* 8KB: mbedTLS handshake needs ~6KB of stack */
 
 /* Memories definition */
