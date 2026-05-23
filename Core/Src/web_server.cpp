@@ -4426,14 +4426,15 @@ void WebServer::handleApiTestResult(uint8_t sn){
     sendResponse(sn,200,"application/json",buf,(uint16_t)len);
 }
 void WebServer::handleApiTestPayload(uint8_t sn){
-    static char payloadBuf[512];
-    int plen = m_app ? m_app->getTestPayload(payloadBuf, sizeof(payloadBuf)) : 0;
+    /* Use m_respBuf (8KB, heap-resident) instead of static 512B buffer —
+     * ocean-monitor JSON array can be >512 bytes for multiple sensors. */
+    int plen = m_app ? m_app->getTestPayload(m_respBuf, RESP_BUF_SIZE) : 0;
     if(plen<=0){
         const char* e="{}";
         sendResponse(sn,200,"application/json",e,(uint16_t)std::strlen(e));
         return;
     }
-    sendResponse(sn,200,"application/json",payloadBuf,(uint16_t)plen);
+    sendResponse(sn,200,"application/json",m_respBuf,(uint16_t)plen);
 }
 
 // ── GET /api/logs ─────────────────────────────────────────────────────────────
