@@ -180,6 +180,7 @@ private:
      */
     void runTestSend();
     void processTestSend();
+    int  getTestPayload(char* buf, size_t bsz);
 
     // ---- LED ----
     void ledOn();
