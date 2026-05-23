@@ -4409,9 +4409,16 @@ void WebServer::handleApiWebMode(uint8_t sn){
 }
 
 // ── POST /api/test_send  /  GET /api/test_result ──────────────────────────────
-void WebServer::handleApiTestSend(uint8_t sn){
+void WebServer::handleApiTestSend(uint8_t sn, const char* queryStr){
+    char valStr[32]{};
+    if(queryStr && getQueryParam(queryStr,"value",valStr,sizeof(valStr)) && valStr[0]){
+        float v = (float)std::atof(valStr);
+        if(m_app) m_app->setTestValue(v);
+    }
     if(m_app) m_app->triggerTestSend();
-    const char* r="{\"ok\":true}";
+    const char* r="{"ok":true}";
+    sendResponse(sn,200,"application/json",r,(uint16_t)std::strlen(r));
+}";
     sendResponse(sn,200,"application/json",r,(uint16_t)std::strlen(r));
 }
 void WebServer::handleApiTestResult(uint8_t sn){
@@ -4750,7 +4757,7 @@ void WebServer::handleRequest(uint8_t sn,const char* request,uint16_t reqLen){
         if(std::strcmp(cleanPath,"/config")==0||
            std::strcmp(cleanPath,"/api/config")==0) handlePostConfig(sn,body);
         else if(std::strcmp(cleanPath,"/api/settime")==0)    handleApiSetTime(sn,body);
-        else if(std::strcmp(cleanPath,"/api/test_send")==0)  handleApiTestSend(sn);
+        else if(std::strcmp(cleanPath,"/api/test_send")==0)  handleApiTestSend(sn,queryStr);
         else if(std::strcmp(cleanPath,"/api/logs/clear")==0) handleApiLogsClear(sn);
     else if(std::strcmp(cleanPath,"/api/backup/download")==0) handleApiBackupDownload(sn);
         else if(std::strcmp(cleanPath,"/api/upload")==0)  handleApiUpload(sn,body,request);
