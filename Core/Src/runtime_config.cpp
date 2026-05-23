@@ -879,7 +879,7 @@ bool RuntimeConfig::loadFromSd(const char* filename) {
         validateAndFix();
         return false;
     }
-    static char buf[10240];
+    static char buf[6144];   // runtime_config.json max ~5KB
     UINT br = 0;
     fr = f_read(&f, buf, sizeof(buf) - 1, &br);
     f_close(&f);
@@ -923,7 +923,7 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
     ftoa6(sensor_zero_level, zStr, sizeof(zStr));
     ftoa6(sensor_divider,    dStr, sizeof(dStr));
 
-    static char json[20480];
+    static char json[8192];  // saveToSd JSON max ~5KB
     int n = 0;
 
     n += std::snprintf(json+n, sizeof(json)-n,
