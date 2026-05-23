@@ -58,7 +58,7 @@ private:
 
     static constexpr uint16_t HTTP_PORT   = 80;
 
-    static constexpr uint16_t REQ_BUF_SIZE  = 12288;
+    static constexpr uint16_t REQ_BUF_SIZE  = 6144;   // POST /api/config ~4KB max
     char m_reqBuf[REQ_BUF_SIZE];
 
     /**
@@ -66,7 +66,7 @@ private:
      * TX отправка идёт чанками по TX_CHUNK_SIZE, поэтому буфер
      * может быть больше TX буфера W5500.
      */
-    static constexpr uint16_t RESP_BUF_SIZE = 12288;
+    static constexpr uint16_t RESP_BUF_SIZE = 8192;   // handleApiConfig ~3KB max
 
     /**
      * TX_CHUNK_SIZE — размер одного вызова send() в sendResponse.
