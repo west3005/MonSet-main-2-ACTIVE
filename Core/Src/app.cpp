@@ -400,28 +400,27 @@ bool App::sendViaMqtt(const char* json,uint16_t len) {
 // value передаётся как СТРОКА (требование протокола)
 // ----------------------------------------------------------------------------
 int App::buildOceanPayload(char* buf, size_t bsz, float val, const DateTime& dt) {
-    /* Build JSON array: one object per sensor reading, each with url/username/password/data.
-     * Format matches ocean-monitor.ru backup:
-     * [{"url":"...","username":"...","password":"...","data":[{"measureTime":"...","metricId":"...","value":"..."}]},...]
-     */
+    /* Build JSON array: one object per sensor reading.
+     * Format: [{"url":"...","username":"...","password":"...","data":[{"measureTime":"...","metricId":"...","value":"..."}]},...] */
     const RuntimeConfig& c = Cfg();
-    char url[192]{};
-    c.buildServerUrl(url, sizeof(url));
+    char surl[192]{};
+    c.buildServerUrl(surl, sizeof(surl));
     int n = 0;
     n += std::snprintf(buf + n, bsz - n, "[");
     bool first = true;
     uint8_t cnt = m_sensor.getReadingCount();
+    /* Common format string — reused for fallback and per-sensor entries */
+    static const char kFmt[] =
+        "{\"url\":\"%s\","
+        "\"username\":\"%s\",\"password\":\"%s\","
+        "\"data\":[{"
+        "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.000Z\","
+        "\"metricId\":\"%s\","
+        "\"value\":\"%.3f\""
+        "}]}";
     if (cnt == 0) {
-        /* fallback: single entry with the passed value */
-        n += std::snprintf(buf + n, bsz - n,
-            "{"url":"%s","
-            ""username":"%s","password":"%s","
-            ""data":[{"
-            ""measureTime":"20%02u-%02u-%02uT%02u:%02u:%02u.000Z","
-            ""metricId":"%s","
-            ""value":"%.3f""
-            "}]}",
-            url, c.proto.ocean_username, c.proto.ocean_password,
+        n += std::snprintf(buf + n, bsz - n, kFmt,
+            surl, c.proto.ocean_username, c.proto.ocean_password,
             (unsigned)dt.year,(unsigned)dt.month,(unsigned)dt.date,
             (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
             c.proto.ocean_metric_id, (double)val);
@@ -431,21 +430,11 @@ int App::buildOceanPayload(char* buf, size_t bsz, float val, const DateTime& dt)
             if (!r.valid) continue;
             if (!first) n += std::snprintf(buf + n, bsz - n, ",");
             first = false;
-            /* Use per-sensor metric_id if name matches a configured field,
-             * otherwise fall back to global ocean_metric_id */
-            const char* mid = c.proto.ocean_metric_id;
-            n += std::snprintf(buf + n, bsz - n,
-                "{"url":"%s","
-                ""username":"%s","password":"%s","
-                ""data":[{"
-                ""measureTime":"20%02u-%02u-%02uT%02u:%02u:%02u.000Z","
-                ""metricId":"%s","
-                ""value":"%.3f""
-                "}]}",
-                url, c.proto.ocean_username, c.proto.ocean_password,
+            n += std::snprintf(buf + n, bsz - n, kFmt,
+                surl, c.proto.ocean_username, c.proto.ocean_password,
                 (unsigned)dt.year,(unsigned)dt.month,(unsigned)dt.date,
                 (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
-                mid, (double)r.value);
+                c.proto.ocean_metric_id, (double)r.value);
         }
     }
     n += std::snprintf(buf + n, bsz - n, "]");
