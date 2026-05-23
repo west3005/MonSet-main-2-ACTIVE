@@ -118,7 +118,7 @@ uint8_t* pDNSMSG;       // DNS message buffer
 uint8_t  DNS_SOCKET;    // SOCKET number for DNS
 uint16_t DNS_MSGID;     // DNS message ID
 
-uint32_t dns_1s_tick;   // for timout of DNS processing
+volatile uint32_t dns_1s_tick;   // volatile: incremented from TIM6 ISR
 static uint8_t retry_count;
 
 /* converts uint16_t from network buffer to a host byte order integer. */
