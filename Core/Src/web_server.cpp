@@ -4051,8 +4051,19 @@ void WebServer::handleTestPage(uint8_t sn){
     SNCAT("<div class='card'><h3>Target URL</h3>"
           "<div style='font-size:12px;color:#8b949e;word-break:break-all'>%s</div></div>",
           _effUrl); }
+    SNCAT("<div class='card'><h3>JSON Preview</h3>"
+          "<pre id='pv' style='font-size:11px;color:#8b949e;white-space:pre-wrap;word-break:break-all'>...</pre>"
+          "<button onclick='doCopy()' style='margin-top:6px;font-size:12px'>&#128203; Copy JSON</button></div>");
+    SNCAT("<div class='card'>"
+          "<button onclick='doTest()' style='width:100%%'>&#9654; Send Test</button>"
+          "<div id='res' style='margin-top:10px;font-size:13px'></div></div>");
     SNCAT("<script>"
           "var t;"
+          "fetch('/api/test_payload').then(r=>r.text()).then(j=>{"
+          "try{document.getElementById('pv').textContent=JSON.stringify(JSON.parse(j),null,2);}"
+          "catch(e){document.getElementById('pv').textContent=j;}}).catch(()=>{});"
+          "function doCopy(){var s=document.getElementById('pv').textContent;"
+          "navigator.clipboard&&navigator.clipboard.writeText(s).then(()=>alert('Copied!'));}"
           "function doTest(){"
           "if(t)clearInterval(t);"
           "var el=document.getElementById('res');"
@@ -4414,6 +4425,16 @@ void WebServer::handleApiTestResult(uint8_t sn){
         state,channel,httpCode,(unsigned long)elapsed);
     sendResponse(sn,200,"application/json",buf,(uint16_t)len);
 }
+void WebServer::handleApiTestPayload(uint8_t sn){
+    static char payloadBuf[512];
+    int plen = m_app ? m_app->getTestPayload(payloadBuf, sizeof(payloadBuf)) : 0;
+    if(plen<=0){
+        const char* e="{}";
+        sendResponse(sn,200,"application/json",e,(uint16_t)std::strlen(e));
+        return;
+    }
+    sendResponse(sn,200,"application/json",payloadBuf,(uint16_t)plen);
+}
 
 // ── GET /api/logs ─────────────────────────────────────────────────────────────
 void WebServer::handleApiLogs(uint8_t sn,const char* queryStr){
@@ -4697,6 +4718,7 @@ void WebServer::handleRequest(uint8_t sn,const char* request,uint16_t reqLen){
         else if(std::strcmp(cleanPath,"/export")==0)      handleExport(sn);
         else if(std::strcmp(cleanPath,"/api/sensors")==0) handleApiSensors(sn);
         else if(std::strcmp(cleanPath,"/api/config")==0)  handleApiConfig(sn);
+        else if(std::strcmp(cleanPath,"/api/test_payload")==0) handleApiTestPayload(sn);
         else if(std::strcmp(cleanPath,"/api/channels")==0)handleApiChannels(sn);
         else if(std::strcmp(cleanPath,"/api/web_mode")==0)handleApiWebMode(sn);
         else if(std::strcmp(cleanPath,"/api/test_result")==0)handleApiTestResult(sn);
