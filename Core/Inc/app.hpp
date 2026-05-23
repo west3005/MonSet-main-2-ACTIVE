@@ -117,6 +117,8 @@ private:
     uint32_t m_testElapsedMs = 0;
     int      m_testHttpCode  = 0;
     char     m_testChannel[16] = "";
+    float    m_testManualValue = 0.0f;  ///< value set via /api/test_send?value=
+    bool     m_testManualSet   = false; ///< true → use m_testManualValue in runTestSend
 
     // ---- Channel status for Modbus TCP Slave ----
     uint8_t m_channelStatus = 0; ///< bit0=ETH,bit1=GSM,bit2=WIFI,bit3=IRIDIUM
@@ -147,6 +149,7 @@ public:
      * @brief Trigger a test send — non-blocking, result polled via getTestResult().
      */
     void triggerTestSend();
+    void setTestValue(float v);  ///< override sensor value for next test send
 
     /**
      * @brief Get test send result for polling.
