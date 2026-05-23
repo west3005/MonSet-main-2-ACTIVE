@@ -4432,8 +4432,6 @@ void WebServer::handleApiTestSend(uint8_t sn, const char* queryStr){
     if(m_app) m_app->triggerTestSend();
     const char* r="{\"ok\":true}";
     sendResponse(sn,200,"application/json",r,(uint16_t)std::strlen(r));
-}";
-    sendResponse(sn,200,"application/json",r,(uint16_t)std::strlen(r));
 }
 void WebServer::handleApiTestResult(uint8_t sn){
     char state[16]{},channel[16]{}; int httpCode=0; uint32_t elapsed=0;
