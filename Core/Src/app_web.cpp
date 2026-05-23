@@ -97,24 +97,33 @@ void App::getTestResult(char* state, char* channel, int* httpCode, uint32_t* ela
 // ============================================================================
 // runTestSend — executes test in the main loop when state==Reading
 // ============================================================================
+void App::setTestValue(float v) {
+    m_testManualValue = v;
+    m_testManualSet   = true;
+}
+
 void App::runTestSend() {
     uint32_t start = HAL_GetTick();
     m_testState = TestSendState::Building;
 
-    // 1. Build payload
     DateTime dt{};
-    float val = m_sensor.read(dt);
-    (void)val;
+    float val;
+    if (m_testManualSet) {
+        val = m_testManualValue;
+        m_testManualSet = false;
+        m_sensor.read(dt);   // fill dt from sensor, ignore return value
+    } else {
+        val = m_sensor.read(dt);
+    }
 
-    char payload[512];
-    int plen = buildMultiSensorPayload(payload, sizeof(payload), "test", dt, false);
+    static char payload[512];
+    int plen = buildOceanPayload(payload, sizeof(payload), val, dt);
     if (plen <= 0) {
         m_testState = TestSendState::Fail;
         DBG.warn("[TEST] payload build failed");
         return;
     }
 
-    // 2. Send via channel manager (test send ignores web_exclusive_mode)
     m_testState = TestSendState::Sending;
     std::strncpy(m_testChannel, "eth", sizeof(m_testChannel) - 1);
     m_testChannel[sizeof(m_testChannel) - 1] = '\0';
@@ -125,7 +134,6 @@ void App::runTestSend() {
     g_web_exclusive = prevWebExclusive;
     m_testElapsedMs = (uint32_t)(HAL_GetTick() - start);
 
-    // Map SendResult to HTTP-style code for the caller
     if (result == SendResult::Ok) {
         m_testHttpCode = 200;
         m_testState    = TestSendState::Success;
