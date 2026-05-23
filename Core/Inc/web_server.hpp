@@ -98,7 +98,7 @@ private:
     void handleApiConfig(uint8_t sn);
     void handleApiChannels(uint8_t sn);
     void handleApiWebMode(uint8_t sn);
-    void handleApiTestSend(uint8_t sn);
+    void handleApiTestSend(uint8_t sn, const char* queryStr);
     void handleApiTestResult(uint8_t sn);
     void handleApiTestPayload(uint8_t sn);  ///< GET /api/test_payload — JSON preview
     void handleApiLogs(uint8_t sn, const char* queryStr);
