@@ -37,21 +37,44 @@ void NMI_Handler(void)
 #include "stm32f4xx_hal.h"
 #include <stdio.h>
 
-void HardFault_Handler(void) {
-    /* Freeze write buffer so IMPRECISERR address is captured */
+/* Extract stacked registers from exception frame for fault diagnosis */
+void HardFault_Impl(uint32_t* sp);
+__attribute__((naked)) void HardFault_Handler(void) {
+    __asm volatile(
+        "tst lr, #4          \n"  /* test EXC_RETURN bit 2: 0=MSP, 1=PSP */
+        "ite eq              \n"
+        "mrseq r0, msp       \n"
+        "mrsne r0, psp       \n"
+        "b HardFault_Impl    \n"
+        :::"r0"
+    );
+}
+void HardFault_Impl(uint32_t* sp) {
     __DSB();
-    char buf[96];
+    uint32_t stacked_r0  = sp[0];
+    uint32_t stacked_r1  = sp[1];
+    uint32_t stacked_r2  = sp[2];
+    uint32_t stacked_r3  = sp[3];
+    uint32_t stacked_r12 = sp[4];
+    uint32_t stacked_lr  = sp[5];
+    uint32_t stacked_pc  = sp[6];
+    uint32_t stacked_xpsr= sp[7];
+    (void)stacked_r0; (void)stacked_r1; (void)stacked_r2; (void)stacked_r3;
+    (void)stacked_r12; (void)stacked_xpsr;
+    char buf[128];
     snprintf(buf, sizeof(buf),
-             "!!! HARDFAULT CFSR=0x%08lX HFSR=0x%08lX SP=0x%08lX\r\n",
+             "!!! HARDFAULT CFSR=0x%08lX HFSR=0x%08lX\r\n"
+             "    PC=0x%08lX LR=0x%08lX SP=0x%08lX\r\n",
              (unsigned long)SCB->CFSR,
              (unsigned long)SCB->HFSR,
-             (unsigned long)__get_MSP());
-    /* Clear fault status registers before reset */
+             (unsigned long)stacked_pc,
+             (unsigned long)stacked_lr,
+             (unsigned long)sp);
     SCB->CFSR = SCB->CFSR;
     SCB->HFSR = SCB->HFSR;
     dbg_puts(buf);
     HAL_Delay(20);
-    NVIC_SystemReset();  /* recovers cleanly; IWDG won't fire on top */
+    NVIC_SystemReset();
 }
 void MemManage_Handler(void)
 {
