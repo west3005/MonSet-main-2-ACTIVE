@@ -9,6 +9,7 @@
 
 #include "main.h"
 #include "stm32f4xx_it.h"
+#include "dns.h"
 
 /* USER CODE BEGIN Includes */
 #include "uart_ringbuf.hpp"
@@ -138,6 +139,13 @@ void TIM6_DAC_IRQHandler(void)
   /* USER CODE END TIM6_DAC_IRQn 0 */
   HAL_TIM_IRQHandler(&htim6);
   /* USER CODE BEGIN TIM6_DAC_IRQn 1 */
+  /* DNS_time_handler must be called every 1 second.
+   * TIM6 fires every 0.5 ms (168MHz / 84 / 1000), so tick every 2000 calls = 1 sec. */
+  static uint16_t s_dns_tick_cnt = 0;
+  if (++s_dns_tick_cnt >= 2000u) {
+      s_dns_tick_cnt = 0;
+      DNS_time_handler();
+  }
   /* USER CODE END TIM6_DAC_IRQn 1 */
 }
 
