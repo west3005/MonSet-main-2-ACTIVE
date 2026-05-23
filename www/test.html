@@ -149,17 +149,7 @@ body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
           </div>
         </div>
 
-        <!-- Значения -->
-        <div class="card">
-          <div class="card-title">Данные для отправки</div>
-          <div style="font-size:12px;color:#8b949e;margin-bottom:10px">
-            Добавьте ключ-значение (JSON-поля телеметрии)
-          </div>
-          <div id="kv-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
-            <!-- строки key/value -->
-          </div>
-          <button class="btn-ghost btn-sm" onclick="addRow()">+ Добавить поле</button>
-        </div>
+
 
         <!-- Действие -->
         <div class="card">
@@ -298,43 +288,16 @@ function selectChannel(name){
 
 /* ── KV-строки ── */
 var rowId=0;
-function addRow(k,v){
-  k=k||''; v=v||'';
-  rowId++;
-  var id=rowId;
-  var div=document.createElement('div');
-  div.id='kv-'+id;
-  div.style.cssText='display:flex;gap:6px;align-items:center';
-  div.innerHTML='<input type="text" placeholder="ключ" value="'+k+'" oninput="updatePreview()" style="flex:1;min-width:80px">'
-               +'<input type="text" placeholder="значение" value="'+v+'" oninput="updatePreview()" style="flex:2;min-width:100px">'
-               +'<button onclick="removeRow('+id+')" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:16px;padding:0 4px;flex-shrink:0" title="Удалить">✕</button>';
-  document.getElementById('kv-list').appendChild(div);
-  updatePreview();
-}
-function removeRow(id){
-  var el=document.getElementById('kv-'+id);
-  if(el) el.remove();
-  updatePreview();
-}
-function getKV(){
-  var obj={};
-  var rows=document.getElementById('kv-list').querySelectorAll('div[id^="kv-"]');
-  rows.forEach(function(row){
-    var inputs=row.querySelectorAll('input');
-    var k=inputs[0].value.trim();
-    var v=inputs[1].value.trim();
-    if(!k) return;
-    var n=parseFloat(v);
-    obj[k]=(v!==''&&!isNaN(n))?n:v;
-  });
-  return obj;
-}
+
+
 function updatePreview(){
-  var kv=getKV();
-  var payload={};
-  if(selectedChannel) payload.channel=selectedChannel;
-  payload.values=kv;
-  document.getElementById('json-preview').textContent=JSON.stringify(payload,null,2);
+  fetch('/api/test_payload')
+    .then(function(r){return r.text();})
+    .then(function(t){
+      try{ t=JSON.stringify(JSON.parse(t),null,2); }catch(e){}
+      document.getElementById('json-preview').textContent=t;
+    })
+    .catch(function(){ document.getElementById('json-preview').textContent='(нет данных)'; });
 }
 
 function resetForm(){
@@ -348,23 +311,15 @@ function resetForm(){
 
 /* ── Отправка ── */
 function doSend(){
-  var kv=getKV();
   var btn=document.getElementById('btn-send');
   btn.disabled=true; btn.textContent='Отправка…';
   var msg=document.getElementById('send-msg');
   msg.style.display='none';
 
-  // POST /api/test_send — тело JSON с выбранным каналом и значениями
-  // Если бэкенд ещё не поддерживает параметры — отправим всё равно (triggerTestSend() сработает)
-  var body=JSON.stringify({
-    channel: selectedChannel||'auto',
-    values:  kv
-  });
-
   fetch('/api/test_send', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: body
+    body: JSON.stringify({channel: selectedChannel||'auto'})
   }).then(function(r){return r.json();}).then(function(d){
     btn.disabled=false; btn.textContent='▶ Отправить';
     if(d.ok||d.status==='pending'||d.status==='sending'){
@@ -414,8 +369,6 @@ function pollResult(cb){
 }
 
 /* ── Инициализация ── */
-addRow('temperature','23.5');
-addRow('pressure','1013.2');
 updatePreview();
 
 function refreshChannels(){
