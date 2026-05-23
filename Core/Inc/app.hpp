@@ -213,6 +213,7 @@ private:
     bool sendViaMqtt(const char* json, uint16_t len);
 
     // ---- JSON builders ----
+    int buildOceanPayload(char* buf, size_t bsz, float val, const DateTime& dt);
     int buildPayload(char* buf, size_t bsz,
                      const char* tsStr, float val, const DateTime& dt,
                      bool asArray);
