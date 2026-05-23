@@ -158,5 +158,14 @@ void App::processTestSend() {
 int App::getTestPayload(char* buf, size_t bsz) {
     DateTime dt{};
     m_sensor.read(dt);
+    if (Cfg().protocol == ProtocolMode::OCEAN_MONITOR) {
+        /* Show exact ocean-monitor.ru JSON array for preview */
+        float val = 0.0f;
+        for (uint8_t i = 0; i < m_sensor.getReadingCount(); i++) {
+            const SensorReading& r = m_sensor.getReading(i);
+            if (r.valid) { val = r.value; break; }
+        }
+        return buildOceanPayload(buf, bsz, val, dt);
+    }
     return buildMultiSensorPayload(buf, bsz, "test", dt, false);
 }
