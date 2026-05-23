@@ -354,7 +354,10 @@ int App::postViaEth(const char* json,uint16_t len) {
         return sendViaMqtt(json,len)?200:-1;
     char url[192]{};
     c.buildServerUrl(url, sizeof(url));
-    const char* auth = c.server_auth_b64[0] ? c.server_auth_b64 : nullptr;
+    // Ocean Monitor: авторизация в теле JSON, заголовок Authorization не нужен
+    const char* auth = (c.protocol==ProtocolMode::OCEAN_MONITOR)
+                       ? nullptr
+                       : (c.server_auth_b64[0] ? c.server_auth_b64 : nullptr);
     if(startsWith(url,"https://"))
         return HttpsW5500::postJson(url, auth, json, len, Config::HTTPS_POST_TIMEOUT_MS);
     if(startsWith(url,"http://"))
@@ -373,7 +376,9 @@ int App::postViaGsm(const char* json,uint16_t len) {
         c.buildServerUrl(url, sizeof(url));
         if(startsWith(url,"https://")) {
             A7670CTls tls(m_gsm);
-            if(c.tls_ca_cert[0]) tls.setCaCert(c.tls_ca_cert);
+            // Ocean Monitor: авторизация в теле JSON, CA не нужен
+            if(c.protocol!=ProtocolMode::OCEAN_MONITOR && c.tls_ca_cert[0])
+                tls.setCaCert(c.tls_ca_cert);
             code=(int)tls.httpsPost(url,json,len);
         } else {
             code=(int)m_gsm.httpPost(url,json,len);
