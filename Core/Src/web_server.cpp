@@ -4409,14 +4409,28 @@ void WebServer::handleApiWebMode(uint8_t sn){
 }
 
 // ── POST /api/test_send  /  GET /api/test_result ──────────────────────────────
+// forward declaration — defined later in this file
+static bool getQueryParam(const char* qs, const char* key, char* out, size_t outSz);
+
 void WebServer::handleApiTestSend(uint8_t sn, const char* queryStr){
     char valStr[32]{};
-    if(queryStr && getQueryParam(queryStr,"value",valStr,sizeof(valStr)) && valStr[0]){
+    if(queryStr && queryStr[0]){
+        /* inline mini-parser: find "value=NNN" in query string */
+        const char* p = std::strstr(queryStr, "value=");
+        if(p){
+            p += 6; /* skip "value=" */
+            size_t i = 0;
+            while(*p && *p != '&' && i < sizeof(valStr)-1)
+                valStr[i++] = *p++;
+            valStr[i] = '\0';
+        }
+    }
+    if(valStr[0]){
         float v = (float)std::atof(valStr);
         if(m_app) m_app->setTestValue(v);
     }
     if(m_app) m_app->triggerTestSend();
-    const char* r="{"ok":true}";
+    const char* r="{\"ok\":true}";
     sendResponse(sn,200,"application/json",r,(uint16_t)std::strlen(r));
 }";
     sendResponse(sn,200,"application/json",r,(uint16_t)std::strlen(r));
