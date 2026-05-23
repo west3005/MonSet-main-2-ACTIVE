@@ -389,7 +389,35 @@ bool App::sendViaMqtt(const char* json,uint16_t len) {
     return m_mqtt.publish(nullptr,json,(uint16_t)len);
 }
 
+// ----------------------------------------------------------------------------
+// buildOceanPayload — формирует JSON для ocean-monitor.ru /api/rest/measures
+// Формат: {"url":"...","username":"...","password":"...","data":[{"measureTime":"...","metricId":"...","value":"%.3f"}]}
+// value передаётся как СТРОКА (требование протокола)
+// ----------------------------------------------------------------------------
+int App::buildOceanPayload(char* buf, size_t bsz, float val, const DateTime& dt) {
+    const RuntimeConfig& c = Cfg();
+    char url[192]{};
+    c.buildServerUrl(url, sizeof(url));
+    return std::snprintf(buf, bsz,
+        "{\"url\":\"%s\","
+        "\"username\":\"%s\",\"password\":\"%s\","
+        "\"data\":[{"
+        "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.000Z\","
+        "\"metricId\":\"%s\","
+        "\"value\":\"%.3f\""
+        "}]}",
+        url,
+        c.proto.ocean_username, c.proto.ocean_password,
+        (unsigned)dt.year,(unsigned)dt.month,(unsigned)dt.date,
+        (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
+        c.proto.ocean_metric_id,
+        (double)val);
+}
+
 int App::buildPayload(char* buf,size_t bsz,const char* tsStr,float val,const DateTime& dt,bool asArray) {
+    // Ocean Monitor использует собственный формат — делегируем
+    if (Cfg().protocol == ProtocolMode::OCEAN_MONITOR)
+        return buildOceanPayload(buf, bsz, val, dt);
     return std::snprintf(buf,bsz,
         "%s{\"ts\":%s,\"values\":{\"metricId\":\"%s\",\"value\":%.3f,"
         "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.000Z\"}}%s",
@@ -399,6 +427,15 @@ int App::buildPayload(char* buf,size_t bsz,const char* tsStr,float val,const Dat
         asArray?"]":"");
 }
 int App::buildMultiSensorPayload(char* buf,size_t bsz,const char* tsStr,const DateTime& dt,bool asArray) {
+    // Ocean Monitor: берём первое валидное показание и делегируем
+    if (Cfg().protocol == ProtocolMode::OCEAN_MONITOR) {
+        float val = 0.0f;
+        for (uint8_t i = 0; i < m_sensor.getReadingCount(); i++) {
+            const SensorReading& r = m_sensor.getReading(i);
+            if (r.valid) { val = r.value; break; }
+        }
+        return buildOceanPayload(buf, bsz, val, dt);
+    }
     int n=0;
     if(asArray) n+=std::snprintf(buf+n,bsz-n,"[");
     n+=std::snprintf(buf+n,bsz-n,"{\"ts\":%s,\"values\":{",tsStr);
