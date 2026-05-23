@@ -156,6 +156,7 @@ public:
      * @param elapsedMs  Output elapsed time in ms
      */
     void getTestResult(char* state, char* channel, int* httpCode, uint32_t* elapsedMs) const;
+    int  getTestPayload(char* buf, size_t bsz);  ///< Build JSON payload preview
 
     /**
      * @brief Get current channel status bitmask (for Modbus TCP Slave).
@@ -180,7 +181,6 @@ private:
      */
     void runTestSend();
     void processTestSend();
-    int  getTestPayload(char* buf, size_t bsz);
 
     // ---- LED ----
     void ledOn();
