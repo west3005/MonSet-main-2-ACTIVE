@@ -151,3 +151,12 @@ void App::processTestSend() {
         runTestSend();
     }
 }
+
+// ============================================================================
+// getTestPayload — build and return the exact JSON that would be sent
+// ============================================================================
+int App::getTestPayload(char* buf, size_t bsz) {
+    DateTime dt{};
+    m_sensor.read(dt);
+    return buildMultiSensorPayload(buf, bsz, "test", dt, false);
+}
