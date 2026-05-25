@@ -507,17 +507,18 @@ window.addEventListener('DOMContentLoaded',function(){
   function toggleFm(){
     fmOpen=!fmOpen;
     document.getElementById('fm').style.display=fmOpen?'block':'none';
-    if(fmOpen) loadDir('/');
+    if(fmOpen) loadDir('0:/');
   }
   function loadDir(p){
     document.getElementById('fm_path').textContent=p;
     fetch('/api/files?path='+encodeURIComponent(p))
       .then(function(r){return r.json();})
-      .then(function(list){
+      .then(function(d){
+        var list=(d&&d.items)?d.items:[];
         var el=document.getElementById('fm_list');
         var h='';
-        var parent=p.replace(/\/+$/,'').replace(/\/[^\/]*$/,'')||'/';
-        if(p!='/') h+='<div>⬆ <a href="#" onclick="loadDir(\''+parent+'\');return false">..</a></div>';
+        var parent=p.replace(/\/+$/,'').replace(/\/[^\/]*$/,'')||'0:/';
+        if(p!='0:/') h+='<div>⬆ <a href="#" onclick="loadDir(\''+parent+'\');return false">..</a></div>';
         list.sort(function(a,b){return (b.dir-a.dir)||(a.name>b.name?1:-1);});
         list.forEach(function(f){
           var fp=(p.endsWith('/')?p:p+'/')+f.name;
@@ -542,7 +543,7 @@ function setNow(){
 function updateCurRtc(){
   fetch('/api/sensors').then(function(r){return r.json()}).then(function(d){
     var el=document.getElementById('cur_rtc');
-    if(el&&d.time)el.textContent='RTC: '+d.time;
+    if(el){el.textContent=d.time?('RTC: '+d.time):('uptime: '+d.uptime_s+'s');}
   }).catch(function(){});
 }
 function setManualTime(){
