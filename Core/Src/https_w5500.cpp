@@ -17,6 +17,7 @@ extern "C" {
 #include "mbedtls/error.h"
 #include "stm32f4xx_hal.h"
 // PSA УБРАН — не нужен без TLS1.3
+extern volatile uint32_t dns_1s_tick; ///< incremented by DNS_time_handler() in TIM6 ISR
 }
 
 volatile bool g_web_exclusive = false;
@@ -57,6 +58,7 @@ static void logMbedtlsErr(const char* tag, int rc) {
 }
 
 static bool resolveHost(const char* host, uint8_t outIp[4]) {
+    // Быстрая проверка — может это уже IP-адрес
     bool isNum = true;
     for (const char* p = host; *p; ++p)
         if (!std::isdigit((unsigned char)*p) && *p != '.') { isNum = false; break; }
@@ -67,17 +69,49 @@ static bool resolveHost(const char* host, uint8_t outIp[4]) {
         outIp[2]=(uint8_t)c; outIp[3]=(uint8_t)d;
         return true;
     }
+
     static uint8_t dnsBuf[512];
-    DNS_init(1, dnsBuf);
     wiz_NetInfo ni{}; wizchip_getnetinfo(&ni);
-    DBG.info("DNS: server %u.%u.%u.%u", ni.dns[0],ni.dns[1],ni.dns[2],ni.dns[3]);
-    uint8_t ip[4]{};
-    int8_t r = DNS_run(ni.dns, (uint8_t*)host, ip);
-    DBG.info("DNS: run host=%s r=%d", host, (int)r);
-    if (r != 1) return false;
-    std::memcpy(outIp, ip, 4);
-    DBG.info("DNS: resolved %u.%u.%u.%u", ip[0],ip[1],ip[2],ip[3]);
-    return true;
+    DBG.info("DNS: resolving [%s] via %u.%u.%u.%u",
+             host, ni.dns[0],ni.dns[1],ni.dns[2],ni.dns[3]);
+
+    /* DNS_run() из ioLibrary блокирующий — ждёт до MAX_DNS_RETRY*DNS_WAIT_TIME (6 сек).
+     * Таймер dns_1s_tick инкрементируется в TIM6 ISR (DNS_time_handler).
+     * Сбрасываем dns_1s_tick = 0 перед каждой попыткой — иначе DNS_run может
+     * немедленно выйти по таймауту если предыдущий вызов оставил tick > 0.
+     * Кормим IWDG до и после вызова — DNS_run может занять до 6 сек. */
+    static const uint8_t  MAX_ATTEMPTS = 3;
+    static const uint32_t ATTEMPT_GUARD_MS = 7000; // чуть больше 6 сек
+
+    for (uint8_t attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        IWDG_FEED();
+        dns_1s_tick = 0;  // сброс таймера перед запросом
+        DNS_init(1, dnsBuf);
+
+        uint8_t ip[4]{};
+        uint32_t t0 = HAL_GetTick();
+        int8_t r = DNS_run(ni.dns, (uint8_t*)host, ip);
+        uint32_t elapsed = HAL_GetTick() - t0;
+        IWDG_FEED();
+
+        DBG.info("DNS: attempt %d/%d r=%d elapsed=%lums",
+                 (int)attempt+1, (int)MAX_ATTEMPTS, (int)r,
+                 (unsigned long)elapsed);
+
+        if (r == 1 && (ip[0]||ip[1]||ip[2]||ip[3])) {
+            std::memcpy(outIp, ip, 4);
+            DBG.info("DNS: OK %u.%u.%u.%u", ip[0],ip[1],ip[2],ip[3]);
+            return true;
+        }
+        // Если застряло дольше guard — прерываем следующие попытки
+        if (elapsed >= ATTEMPT_GUARD_MS) {
+            DBG.error("DNS: guard timeout on attempt %d, abort", (int)attempt+1);
+            break;
+        }
+        if (attempt + 1 < MAX_ATTEMPTS) HAL_Delay(200);
+    }
+    DBG.error("DNS: failed to resolve [%s]", host);
+    return false;
 }
 
 static int w5500_send_cb(void* ctx, const unsigned char* buf, size_t len) {
