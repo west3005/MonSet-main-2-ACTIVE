@@ -459,13 +459,14 @@ function save(){
   var sl_regs=regs.map(function(r){return{ad:r.ad,si:SRC.indexOf(r.src)<0?0:SRC.indexOf(r.src),dt:r.dt,sc:r.sc,un:r.un,nm:r.nm}});
   // syncSaveFields() уже выполнена выше
   var out=buildOut(sl_regs);
-  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(out)})
-    .then(function(r){return r.json().then(function(d){
+  var _ctrl=new AbortController(),_tid=setTimeout(function(){_ctrl.abort();},15000);
+  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(out),signal:_ctrl.signal})
+    .then(function(r){clearTimeout(_tid);return r.json().then(function(d){
       if(r.ok && d.saved_to_sd) showMsg(true,'✓ Сохранено на SD');
       else if(r.ok) showMsg(null,'⚠ Применено в RAM (SD недоступна)');
       else showMsg(false,'✗ Ошибка: '+(d.error||'неизвестно'));
-      if(r.ok) setTimeout(reloadCfg, 300); // небольшая задержка — SD flush
-    });}).catch(function(){showMsg(false,'✗ Нет связи с устройством');});
+      if(r.ok) setTimeout(reloadCfg, 300);
+    });}).catch(function(e){clearTimeout(_tid);showMsg(false,e.name==='AbortError'?'✗ Таймаут ответа (>15с)':'✗ Нет связи с устройством');});
 }
 
 function rst(){
