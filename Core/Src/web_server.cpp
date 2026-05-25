@@ -4621,16 +4621,10 @@ void WebServer::handlePostConfig(uint8_t sn,const char* body){
 
         Cfg() = tmp;
 
-        char resp[256];
-        if (sdSaved) {
-            std::snprintf(resp, sizeof(resp),
-                "{\"status\":\"ok\",\"saved_to_sd\":true,\"save_target\":\"sd\",\"message\":\"Saved to %s & RAM.\"}",
-                RUNTIME_CONFIG_FILENAME);
-        } else {
-            std::snprintf(resp, sizeof(resp),
-                "{\"status\":\"ok_ram\",\"saved_to_sd\":false,\"save_target\":\"ram\",\"message\":\"Applied in RAM only. SD error!\"}");
-        }
-
+        /* Статические JSON-ответы — без snprintf/буфера, нет риска переполнения */
+        static const char RESP_SD[]  = "{\"status\":\"ok\",\"saved_to_sd\":true}";
+        static const char RESP_RAM[] = "{\"status\":\"ok_ram\",\"saved_to_sd\":false}";
+        const char* resp = sdSaved ? RESP_SD : RESP_RAM;
         sendResponse(sn, 200, "application/json", resp, (uint16_t)std::strlen(resp));
         DBG.info("WebServer: config updated via tmp cfg, sd_saved=%d", (int)sdSaved);
     }else{
