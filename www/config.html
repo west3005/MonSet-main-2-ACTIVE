@@ -154,19 +154,9 @@ body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
 <details><summary>B: Протокол и сервер</summary><div class="sc">
 <div style="margin-bottom:10px"><label style="font-size:11px;color:#8b949e;display:block;margin-bottom:6px">Протокол</label>
 <div class="proto-grid" id="proto-grid">
-<div class="proto-card active" data-proto="https_generic" onclick="sp('https_generic')"><div class="proto-dot"></div>HTTPS Generic</div>
-<div class="proto-card" data-proto="ocean_monitor" onclick="sp('ocean_monitor')"><div class="proto-dot"></div>Ocean Monitor</div>
-<div class="proto-card" data-proto="https_tb" onclick="sp('https_tb')"><div class="proto-dot"></div>HTTPS Legacy</div>
-<div class="proto-card" data-proto="mqtt_gen" onclick="sp('mqtt_gen')"><div class="proto-dot"></div>MQTT Generic</div>
-<div class="proto-card" data-proto="mqtt_tb" onclick="sp('mqtt_tb')"><div class="proto-dot"></div>MQTT TB</div>
-<div class="proto-card" data-proto="webhook" onclick="sp('webhook')"><div class="proto-dot"></div>Webhook</div>
+<div class="proto-card active" data-proto="ocean_monitor" onclick="sp('ocean_monitor')"><div class="proto-dot"></div>Ocean Monitor</div>
 </div></div>
-<div id="g_tb"><div class="r"><div class="f"><label>Хост сервера</label><input type="text" id="server_host" placeholder="monset.ru" onchange="c('server_host',this.value)"></div><div class="f"><label>Токен (X-Device-Token)</label><input type="text" id="server_token" onchange="c('server_token',this.value)"></div><div class="f"><label>Путь</label><input type="text" id="server_path" value="/api/ingest" onchange="c('server_path',this.value)"></div><div class="f" style="max-width:90px"><label>Порт</label><input type="number" id="server_port" value="443" onchange="c('server_port',+this.value)"></div></div><!-- legacy hidden --><input type="hidden" id="tb_host"><input type="hidden" id="tb_token"><input type="hidden" id="tb_port" value="443"></div>
-<div id="g_mqtt" style="display:none"><div class="r"><div class="f"><label>MQTT Хост</label><input type="text" id="mqtt_host" onchange="c('mqtt_host',this.value)"></div><div class="f" style="max-width:90px"><label>Порт</label><input type="number" id="mqtt_port" value="1883" onchange="c('mqtt_port',+this.value)"></div></div>
-<div class="r"><div class="f"><label>Пользователь</label><input type="text" id="mqtt_user" onchange="c('mqtt_user',this.value)"></div><div class="f"><label>Пароль</label><input type="password" id="mqtt_pass" onchange="c('mqtt_pass',this.value)"></div></div>
-<div class="r"><div class="f"><label>Топик</label><input type="text" id="mqtt_topic" onchange="c('mqtt_topic',this.value)"></div><div class="f" style="max-width:80px"><label>QoS</label><select id="mqtt_qos" onchange="c('mqtt_qos',+this.value)"><option>0</option><option>1</option><option>2</option></select></div><div class="tg" style="margin-top:16px"><input type="checkbox" id="mqtt_tls" onchange="c('mqtt_tls',this.checked)"><span>TLS</span></div></div></div>
-<div id="g_wh" style="display:none"><div class="r"><div class="f"><label>URL Webhook</label><input type="text" id="webhook_url" onchange="c('webhook_url',this.value)"></div><div class="f" style="max-width:100px"><label>Метод</label><select id="webhook_method" onchange="c('webhook_method',this.value)"><option>GET</option><option selected>POST</option><option>PUT</option></select></div></div></div>
-<div id="g_ocean" style="display:none"><div class="r"><div class="f"><label>Хост сервера</label><input type="text" id="ocean_host" value="ocean-monitor.ru" onchange="c('ocean_host',this.value)"></div><div class="f"><label>Путь</label><input type="text" id="ocean_path" value="/api/rest/measures" onchange="c('ocean_path',this.value)"></div><div class="f" style="max-width:90px"><label>Порт</label><input type="number" id="ocean_port" value="443" onchange="c('ocean_port',+this.value)"></div></div><div class="r"><div class="f"><label>Логин (username)</label><input type="text" id="ocean_username" onchange="c('ocean_username',this.value)"></div><div class="f"><label>Пароль (password)</label><input type="password" id="ocean_password" onchange="c('ocean_password',this.value)"></div></div><div class="r"><div class="f"><label>Metric ID (UUID поля датчика)</label><input type="text" id="ocean_metric_id" placeholder="ef4eba22-c110-11ee-..." onchange="c('ocean_metric_id',this.value)"></div></div></div>
+<div id="g_ocean"><div class="r"><div class="f"><label>Хост сервера</label><input type="text" id="ocean_host" value="ocean-monitor.ru" onchange="c('ocean_host',this.value)"></div><div class="f"><label>Путь</label><input type="text" id="ocean_path" value="/api/rest/measures" onchange="c('ocean_path',this.value)"></div><div class="f" style="max-width:90px"><label>Порт</label><input type="number" id="ocean_port" value="443" onchange="c('ocean_port',+this.value)"></div></div><div class="r"><div class="f"><label>Логин (username)</label><input type="text" id="ocean_username" value="Data_sender_test" readonly style="opacity:.7" onchange="c('ocean_username',this.value)"></div><div class="f"><label>Пароль (password)</label><input type="password" id="ocean_password" value="12345678" readonly style="opacity:.7" onchange="c('ocean_password',this.value)"></div></div><div class="r"><div class="f"><label>Metric ID</label><input type="text" id="ocean_metric_id" value="ec2ff872-3cbb-48a6-912f-69f44c6e023d" onchange="c('ocean_metric_id',this.value)"></div></div></div>
 </div></details>
 <details><summary>C: Расписание и опрос</summary><div class="sc">
 <div class="r">
@@ -229,17 +219,10 @@ function c(k,v){cfg[k]=v}
 function sh(id,v){document.getElementById(id).style.display=v?'flex':'none'}
 
 function sp(v){
-  // Обновляем визуал карточек
   document.querySelectorAll('#proto-grid .proto-card').forEach(function(c){
-    var active=(c.getAttribute('data-proto')===v);
-    c.classList.toggle('active',active);
+    c.classList.toggle('active',c.getAttribute('data-proto')===v);
   });
-  // Показываем нужный блок полей
-  document.getElementById('g_tb').style.display=(v==='https_generic'||v==='https_tb'||v==='mqtt_tb')?'block':'none';
-  document.getElementById('g_mqtt').style.display=(v==='mqtt_gen'||v==='mqtt_tb')?'block':'none';
-  document.getElementById('g_wh').style.display=(v==='webhook')?'block':'none';
-  document.getElementById('g_ocean').style.display=(v==='ocean_monitor')?'block':'none';
-  // Жёстко фиксируем значение в cfg — независимо от того что вернула прошивка
+  document.getElementById('g_ocean').style.display='block';
   cfg.proto=v;
 }
 
@@ -393,7 +376,13 @@ function reloadCfg(){
     ['mqtt_qos','webhook_method','tz_off'].forEach(function(k){
       var e=document.getElementById(k);if(e&&d[k]!==undefined)e.value=d[k];
     });
-    sp(d.proto||'https_generic'); // фиксируем карточку и cfg.proto
+    sp('ocean_monitor'); // всегда Ocean Monitor
+  // Захардкоженные учётные данные — подставляем если пустые
+  if(!d.ocean_username){d.ocean_username='Data_sender_test';}
+  if(!d.ocean_password){d.ocean_password='12345678';}
+  if(!d.ocean_metric_id){d.ocean_metric_id='ec2ff872-3cbb-48a6-912f-69f44c6e023d';}
+  cfg.ocean_username=d.ocean_username;cfg.ocean_password=d.ocean_password;
+  cfg.ocean_metric_id=d.ocean_metric_id;
     // Sync ocean fields into cfg so save() picks them up without user re-entering
     ['ocean_host','ocean_path','ocean_username','ocean_password','ocean_metric_id'].forEach(function(k){
       if(d[k]!==undefined)cfg[k]=d[k];
@@ -447,6 +436,11 @@ function syncSaveFields(){
   var _spv=document.getElementById('server_path');if(_spv)cfg.server_path=_spv.value;
   var _srvp=document.getElementById('server_port');if(_srvp){cfg.server_port=parseInt(_srvp.value,10)||443;cfg.tb_port=cfg.server_port;}
   cfg.server_url='';
+  // Всегда ocean_monitor + захардкоженные учётные данные
+  cfg.proto='ocean_monitor';
+  if(!cfg.ocean_username)cfg.ocean_username='Data_sender_test';
+  if(!cfg.ocean_password)cfg.ocean_password='12345678';
+  if(!cfg.ocean_metric_id)cfg.ocean_metric_id='ec2ff872-3cbb-48a6-912f-69f44c6e023d';
 }
 
 // Собирает финальный объект для отправки на SD / экспорта
