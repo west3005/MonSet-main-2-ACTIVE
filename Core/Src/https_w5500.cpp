@@ -101,16 +101,19 @@ static bool resolveHost(const char* host, uint8_t outIp[4]) {
         if (r == 1 && (ip[0]||ip[1]||ip[2]||ip[3])) {
             std::memcpy(outIp, ip, 4);
             DBG.info("DNS: OK %u.%u.%u.%u", ip[0],ip[1],ip[2],ip[3]);
+            close(1); HAL_Delay(20); // освобождаем UDP сокет перед TCP
             return true;
         }
         // Если застряло дольше guard — прерываем следующие попытки
         if (elapsed >= ATTEMPT_GUARD_MS) {
             DBG.error("DNS: guard timeout on attempt %d, abort", (int)attempt+1);
+            close(1);
             break;
         }
         if (attempt + 1 < MAX_ATTEMPTS) HAL_Delay(200);
     }
     DBG.error("DNS: failed to resolve [%s]", host);
+    close(1);
     return false;
 }
 
@@ -265,14 +268,31 @@ int HttpsW5500::postJson(const char* httpsUrl, const char* authB64,
     TLS_STEP(3, "TCP socket+connect");
     DBG.info("HTTPS: connect %s:%u", u.host, (unsigned)u.port);
     DBG.info("HTTPS: ip %u.%u.%u.%u", s_ip[0],s_ip[1],s_ip[2],s_ip[3]);
-    const uint8_t sn = 0;
+    const uint8_t sn = 1;  // sn1=HTTPS/TLS 2KB TX/RX (wizchip_init карта)
     if (socket(sn, Sn_MR_TCP, 50001, 0) != sn) {
         DBG.error("HTTPS: socket() fail"); close(sn); return -20;
     }
     DBG.info("HTTPS: after socket: Sn_SR=0x%02X Sn_IR=0x%02X",
              getSn_SR(sn), getSn_IR(sn));
-    if (connect(sn, s_ip, u.port) != SOCK_OK) {
-        DBG.error("HTTPS: connect() fail"); close(sn); return -21;
+    // connect() ioLibrary блокирующий — добавляем watchdog и таймаут
+    connect(sn, s_ip, u.port); // инициирует SYN
+    {
+        uint32_t t0 = HAL_GetTick();
+        uint8_t sr;
+        while (true) {
+            IWDG_FEED();
+            sr = getSn_SR(sn);
+            if (sr == SOCK_ESTABLISHED) break;
+            if (sr == SOCK_CLOSED || sr == SOCK_CLOSE_WAIT) {
+                DBG.error("HTTPS: connect fail SR=0x%02X", sr);
+                close(sn); return -21;
+            }
+            if ((HAL_GetTick() - t0) > 8000) {
+                DBG.error("HTTPS: connect timeout SR=0x%02X", sr);
+                disconnect(sn); close(sn); return -22;
+            }
+            HAL_Delay(5);
+        }
     }
     DBG.info("HTTPS: connected: Sn_SR=0x%02X Sn_IR=0x%02X",
              getSn_SR(sn), getSn_IR(sn));
