@@ -4135,9 +4135,10 @@ void WebServer::handleApiSensors(uint8_t sn){
             "\"battery\":{\"voltage\":0,\"percent\":0,\"low\":false}");
     }
     uint32_t tick = HAL_GetTick() / 1000;
+    uint8_t sensorCnt = m_sensor ? m_sensor->getReadingCount() : 0;
     n+=std::snprintf(m_respBuf+n,RESP_BUF_SIZE-n,
-        ",\"uptime_s\":%lu,\"timestamp\":\"uptime %lu s\"}",
-        (unsigned long)tick,(unsigned long)tick);
+        ",\"count\":%u,\"uptime_s\":%lu,\"timestamp\":\"uptime %lu s\"}",
+        (unsigned)sensorCnt,(unsigned long)tick,(unsigned long)tick);
     if(n<0||n>=(int)RESP_BUF_SIZE) n=RESP_BUF_SIZE-1;
     sendResponse(sn,200,"application/json",m_respBuf,(uint16_t)n);
 }
@@ -4830,6 +4831,8 @@ void WebServer::handleFiles(uint8_t sn){
 void WebServer::handleApiFiles(uint8_t sn, const char* queryStr, const char* /*request*/){
     char dirPath[64]="0:/";
     getQueryParam(queryStr,"path",dirPath,sizeof(dirPath));
+    // FatFS не принимает "/" как корень — маппируем на "0:/"
+    if(std::strcmp(dirPath,"/")==0 || dirPath[0]=='\0') std::strncpy(dirPath,"0:/",sizeof(dirPath));
 
     char resp[4096]; int n=0;
     n+=std::snprintf(resp+n,sizeof(resp)-n,"{\"path\":\"%s\",\"items\":[",dirPath);
