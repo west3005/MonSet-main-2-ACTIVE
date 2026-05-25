@@ -163,17 +163,16 @@ void WebServer::sendResponse(uint8_t sn, int code, const char* ct,
             "Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
             status, ct, (unsigned)bodyLen);
     }
-    send(sn, (uint8_t*)hdr, (uint16_t)hlen);
+    w5500_send(sn, (uint8_t*)hdr, (uint16_t)hlen);
 
-    /* ── Chunked TX to handle W5500 2KB/socket TX buffer limit ── */
+    /* ── Chunked TX: w5500_send ждёт TX_FSR перед каждым чанком ── */
     uint16_t offset = 0;
     while (offset < bodyLen && body) {
         uint16_t chunk = bodyLen - offset;
         if (chunk > TX_CHUNK_SIZE) chunk = TX_CHUNK_SIZE;
-        int32_t r = send(sn, (uint8_t*)(body + offset), chunk);
-        if (r <= 0) break;
-        offset += (uint16_t)r;
-        IWDG->KR = 0xAAAA;   // кормим watchdog при больших страницах
+        IWDG->KR = 0xAAAA;
+        w5500_send(sn, (uint8_t*)(body + offset), chunk);
+        offset += chunk;
     }
 }
 void WebServer::send401(uint8_t sn){
@@ -5033,7 +5032,7 @@ void WebServer::tick(){
                 { uint32_t t0=HAL_GetTick();
                   uint16_t txmax=getSn_TxMAX(HTTP_SOCKET);
                   while(getSn_TX_FSR(HTTP_SOCKET)<txmax &&
-                        (HAL_GetTick()-t0)<3000){ IWDG->KR=0xAAAA; HAL_Delay(2); }
+                        (HAL_GetTick()-t0)<5000){ IWDG->KR=0xAAAA; HAL_Delay(2); }
                 }
                 disconnect(HTTP_SOCKET);
             }
