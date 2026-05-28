@@ -354,10 +354,13 @@ int App::postViaEth(const char* json,uint16_t len) {
         return sendViaMqtt(json,len)?200:-1;
     char url[192]{};
     c.buildServerUrl(url, sizeof(url));
-    // Ocean Monitor: авторизация в теле JSON, заголовок Authorization не нужен
-    const char* auth = (c.protocol==ProtocolMode::OCEAN_MONITOR)
-                       ? nullptr
-                       : (c.server_auth_b64[0] ? c.server_auth_b64 : nullptr);
+    // Ocean Monitor: авторизация через Authorization: Basic header
+    const char* auth = nullptr;
+    if (c.protocol == ProtocolMode::OCEAN_MONITOR) {
+        auth = c.server_auth_b64[0] ? c.server_auth_b64 : nullptr;
+    } else {
+        auth = c.server_auth_b64[0] ? c.server_auth_b64 : nullptr;
+    }
     if(startsWith(url,"https://"))
         return HttpsW5500::postJson(url, auth, json, len, Config::HTTPS_POST_TIMEOUT_MS);
     if(startsWith(url,"http://"))
@@ -376,8 +379,7 @@ int App::postViaGsm(const char* json,uint16_t len) {
         c.buildServerUrl(url, sizeof(url));
         if(startsWith(url,"https://")) {
             A7670CTls tls(m_gsm);
-            // Ocean Monitor: авторизация в теле JSON, CA не нужен
-            if(c.protocol!=ProtocolMode::OCEAN_MONITOR && c.tls_ca_cert[0])
+            if(c.tls_ca_cert[0])
                 tls.setCaCert(c.tls_ca_cert);
             code=(int)tls.httpsPost(url,json,len);
         } else {
@@ -396,29 +398,74 @@ bool App::sendViaMqtt(const char* json,uint16_t len) {
 
 // ----------------------------------------------------------------------------
 // buildOceanPayload — формирует JSON для ocean-monitor.ru /api/rest/measures
-// Формат: {"url":"...","username":"...","password":"...","data":[{"measureTime":"...","metricId":"...","value":"%.3f"}]}
-// value передаётся как СТРОКА (требование протокола)
+//
+// Формат ocean-station (плоский массив, без обёртки url/username/password):
+//   [{"metricId":"...","value":"%.3f","measureTime":"YYYY-MM-DDTHH:MM:SS.mmmZ"},...]
+//
+// - value передаётся как СТРОКА с 3 знаками после точки (требование протокола)
+// - measureTime: ISO 8601 UTC с реальными миллисекундами (вычисляются из Unix timestamp)
+// - все валидные SensorReading включаются в массив (multi-metric)
+// - если ни одного валидного reading нет — используется переданный val как fallback
+// - авторизация передаётся через Authorization: Basic HTTP-заголовок (не в теле)
 // ----------------------------------------------------------------------------
 int App::buildOceanPayload(char* buf, size_t bsz, float val, const DateTime& dt) {
-    /* Ocean-monitor.ru format — single measurement:
-     * [{"url":"...","username":"...","password":"...","data":[{"measureTime":"...","metricId":"...","value":"..."}]}] */
     const RuntimeConfig& c = Cfg();
-    char surl[192]{};
-    c.buildServerUrl(surl, sizeof(surl));
-    return std::snprintf(buf, bsz,
-        "[{\"url\":\"%s\","
-        "\"username\":\"%s\",\"password\":\"%s\","
-        "\"data\":[{"
-        "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.000Z\","
-        "\"metricId\":\"%s\","
-        "\"value\":\"%.3f\""
-        "}]}]",
-        surl,
-        c.proto.ocean_username, c.proto.ocean_password,
-        (unsigned)dt.year, (unsigned)dt.month,  (unsigned)dt.date,
-        (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
-        c.proto.ocean_metric_id,
-        (double)val);
+
+    // Вычисляем реальные миллисекунды из RTC timestamp
+    uint64_t unixMs = toUnixMs(dt);
+    uint16_t ms = (uint16_t)(unixMs % 1000ULL);
+
+    int n = 0;
+    n += std::snprintf(buf + n, bsz - n, "[");
+    if (n < 0 || (size_t)n >= bsz) return -1;
+
+    bool added = false;
+    uint8_t readingCount = m_sensor.getReadingCount();
+
+    for (uint8_t i = 0; i < readingCount; i++) {
+        const SensorReading& r = m_sensor.getReading(i);
+        if (!r.valid) continue;
+
+        // Выбираем metric_id: из reading.name если не пустой, иначе глобальный
+        const char* mid = (r.name[0] != '\0') ? r.name : c.proto.ocean_metric_id;
+        if (mid[0] == '\0') mid = c.metric_id;
+
+        if (added) {
+            n += std::snprintf(buf + n, bsz - n, ",");
+            if (n < 0 || (size_t)n >= bsz) return -1;
+        }
+        n += std::snprintf(buf + n, bsz - n,
+            "{\"metricId\":\"%s\","
+            "\"value\":\"%.3f\","
+            "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.%03uZ\"}",
+            mid,
+            (double)r.value,
+            (unsigned)dt.year, (unsigned)dt.month,  (unsigned)dt.date,
+            (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
+            (unsigned)ms);
+        if (n < 0 || (size_t)n >= bsz) return -1;
+        added = true;
+    }
+
+    // Fallback: если ни одного валидного reading нет — используем переданный val
+    if (!added) {
+        const char* mid = c.proto.ocean_metric_id[0] ? c.proto.ocean_metric_id : c.metric_id;
+        n += std::snprintf(buf + n, bsz - n,
+            "{\"metricId\":\"%s\","
+            "\"value\":\"%.3f\","
+            "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.%03uZ\"}",
+            mid,
+            (double)val,
+            (unsigned)dt.year, (unsigned)dt.month,  (unsigned)dt.date,
+            (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
+            (unsigned)ms);
+        if (n < 0 || (size_t)n >= bsz) return -1;
+    }
+
+    n += std::snprintf(buf + n, bsz - n, "]");
+    if (n < 0 || (size_t)n >= bsz) return -1;
+
+    return n;
 }
 
 int App::buildPayload(char* buf,size_t bsz,const char* tsStr,float val,const DateTime& dt,bool asArray) {
@@ -434,7 +481,7 @@ int App::buildPayload(char* buf,size_t bsz,const char* tsStr,float val,const Dat
         asArray?"]":"");
 }
 int App::buildMultiSensorPayload(char* buf,size_t bsz,const char* tsStr,const DateTime& dt,bool asArray) {
-    // Ocean Monitor: берём первое валидное показание и делегируем
+    // Ocean Monitor: используем buildOceanPayload (multi-metric, плоский формат)
     if (Cfg().protocol == ProtocolMode::OCEAN_MONITOR) {
         float val = 0.0f;
         for (uint8_t i = 0; i < m_sensor.getReadingCount(); i++) {
