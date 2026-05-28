@@ -44,6 +44,49 @@ extern "C" {
 #include "dns.h"
 #include "w5500.h"
 #include "wizchip_conf.h"
+// ================================================================
+// Буфер усреднения (Этап 2 — агрегация по send_interval)
+// Аналог value_buffer: HashMap<metric_id, Vec<f64>> из ocean-station.
+// Без heap — статический C-массив по индексу SensorReading.
+// MAX_AVG_SAMPLES рассчитан на poll_interval=5с, send=12 polls (1 мин)
+// плюс запас. RAM: 16 * 60 * 4 = 3840 байт — приемлемо для STM32F4.
+// ================================================================
+#ifndef MAX_AVG_CHANNELS
+#define MAX_AVG_CHANNELS  MAX_MODBUS_ENTRIES  ///< = 16, по числу каналов
+#endif
+#ifndef MAX_AVG_SAMPLES
+#define MAX_AVG_SAMPLES   60                  ///< максимум отсчётов на интервал
+#endif
+
+static float   s_avgBuf[MAX_AVG_CHANNELS][MAX_AVG_SAMPLES]{};
+static uint8_t s_avgCount[MAX_AVG_CHANNELS]{};
+
+/// Добавить значение val в буфер канала ch
+static inline void avgPush(uint8_t ch, float val) {
+    if (ch >= MAX_AVG_CHANNELS) return;
+    if (s_avgCount[ch] < MAX_AVG_SAMPLES)
+        s_avgBuf[ch][s_avgCount[ch]++] = val;
+}
+
+/// Вычислить среднее по буферу канала ch (возвращает 0.0 если буфер пуст)
+static inline float avgGet(uint8_t ch) {
+    if (ch >= MAX_AVG_CHANNELS || s_avgCount[ch] == 0) return 0.0f;
+    float sum = 0.0f;
+    for (uint8_t i = 0; i < s_avgCount[ch]; i++) sum += s_avgBuf[ch][i];
+    return sum / (float)s_avgCount[ch];
+}
+
+/// Сбросить буфер канала ch
+static inline void avgClear(uint8_t ch) {
+    if (ch < MAX_AVG_CHANNELS) s_avgCount[ch] = 0;
+}
+
+/// Сбросить все буферы
+static inline void avgClearAll() {
+    for (uint8_t i = 0; i < MAX_AVG_CHANNELS; i++) s_avgCount[i] = 0;
+}
+
+
 }
 
 #ifdef W5500
@@ -426,6 +469,10 @@ int App::buildOceanPayload(char* buf, size_t bsz, float val, const DateTime& dt)
         const SensorReading& r = m_sensor.getReading(i);
         if (!r.valid) continue;
 
+        // Этап 2: используем среднее из буфера если есть накопленные отсчёты,
+        // иначе — текущее значение (первый poll или буфер пуст)
+        float sendVal = (s_avgCount[i] > 0) ? avgGet(i) : r.value;
+
         // Выбираем metric_id: из reading.name если не пустой, иначе глобальный
         const char* mid = (r.name[0] != '\0') ? r.name : c.proto.ocean_metric_id;
         if (mid[0] == '\0') mid = c.metric_id;
@@ -439,7 +486,7 @@ int App::buildOceanPayload(char* buf, size_t bsz, float val, const DateTime& dt)
             "\"value\":\"%.3f\","
             "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.%03uZ\"}",
             mid,
-            (double)r.value,
+            (double)sendVal,
             (unsigned)dt.year, (unsigned)dt.month,  (unsigned)dt.date,
             (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
             (unsigned)ms);
@@ -449,13 +496,14 @@ int App::buildOceanPayload(char* buf, size_t bsz, float val, const DateTime& dt)
 
     // Fallback: если ни одного валидного reading нет — используем переданный val
     if (!added) {
+        float sendVal = (s_avgCount[0] > 0) ? avgGet(0) : val;
         const char* mid = c.proto.ocean_metric_id[0] ? c.proto.ocean_metric_id : c.metric_id;
         n += std::snprintf(buf + n, bsz - n,
             "{\"metricId\":\"%s\","
             "\"value\":\"%.3f\","
             "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.%03uZ\"}",
             mid,
-            (double)val,
+            (double)sendVal,
             (unsigned)dt.year, (unsigned)dt.month,  (unsigned)dt.date,
             (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
             (unsigned)ms);
@@ -645,6 +693,18 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
         DateTime ts{};
         float val = m_sensor.read(ts);
         m_sensorAlive = (val > -9998.0f);
+
+        // Накапливаем значения в буфер усреднения (Этап 2)
+        // Аналог ocean-station: value_buffer[metric_id].push(val)
+        {
+            uint8_t cnt = m_sensor.getReadingCount();
+            for (uint8_t _i = 0; _i < cnt && _i < MAX_AVG_CHANNELS; _i++) {
+                const SensorReading& _r = m_sensor.getReading(_i);
+                if (_r.valid) avgPush(_i, _r.value);
+            }
+            // Fallback: если нет multi-sensor readings — копим legacy val
+            if (cnt == 0 && m_sensorAlive) avgPush(0, val);
+        }
         const uint64_t unixMs = toUnixMs(ts);
         char tsStr[24]; u64ToDec(tsStr, sizeof(tsStr), unixMs);
         char timeStr[32]{}; ts.formatISO8601(timeStr);
@@ -692,9 +752,19 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
                 } else {
                     SendResult result = m_channelMgr.sendData(m_json, (uint16_t)jsonLen);
                     m_channelAlive = (result == SendResult::Ok);
-                    if      (result == SendResult::Ok)          DBG.info("Data sent OK");
-                    else if (result == SendResult::SavedBackup) DBG.warn("Data saved to backup");
-                    else                                         DBG.error("Data send FAILED");
+                    if (result == SendResult::Ok) {
+                        DBG.info("Data sent OK");
+                        // Этап 2: сброс буферов усреднения после успешной отправки
+                        // Аналог ocean-station: value_buffer.clear()
+                        avgClearAll();
+                    } else if (result == SendResult::SavedBackup) {
+                        DBG.warn("Data saved to backup");
+                        // Сбрасываем буфер и при сохранении в backup — данные уже записаны
+                        avgClearAll();
+                    } else {
+                        DBG.error("Data send FAILED");
+                        // Буфер НЕ сбрасываем при ошибке — накапливаем дальше
+                    }
                 }
             }
         }
