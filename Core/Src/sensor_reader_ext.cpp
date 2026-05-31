@@ -106,7 +106,10 @@ float SensorReader::readModbusDevice(ModbusRTU& port,
     }
 
     float val = parseModbusRegisters(raw, dev.data_type);
-    val = val * dev.scale + dev.offset;
+    // Этап 3: формула масштабирования — аналог ocean-station ScalingConfig
+    // ocean-station: value = (multiplier * raw) / divider - reference_level
+    // MonSet:        val   = (scale      * raw) / divider - offset
+    val = (val * dev.scale) / dev.divider - dev.offset;
 
     DBG.info("RTU: %s=%.3f %s", dev.name, (double)val, dev.unit);
     return val;
