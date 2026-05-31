@@ -31,7 +31,8 @@ static constexpr uint8_t MAX_SENSOR_READINGS = MAX_MODBUS_ENTRIES;
 
 /// A single sensor reading result
 struct SensorReading {
-    char     name[32]{};
+    char     name[64]{};         ///< Metric identifier (UUID или имя); 64 = полный UUID (36 символов) + запас
+                                 ///< Этап 4: расширено с 32 до 64 — иначе UUID (36 симв.) обрезался
     float    value     = 0.0f;   ///< Calibrated value
     float    raw_value = 0.0f;   ///< Raw value before calibration
     char     unit[16]{};

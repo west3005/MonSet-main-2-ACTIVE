@@ -524,6 +524,10 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
         if (std::strcmp(ethMode,"static") == 0) tmp.eth_mode = EthMode::Static;
     }
     (void)jsonGetMac (json, "w5500_mac", tmp.w5500_mac);
+    /* Если MAC в JSON нулевой (00:00:00:00:00:00) — подставить дефолт из config.hpp */
+    { bool macZero = true;
+      for (int _i = 0; _i < 6; _i++) if (tmp.w5500_mac[_i]) { macZero = false; break; }
+      if (macZero) std::memcpy(tmp.w5500_mac, Config::W5500_MAC, 6); }
     (void)jsonGetIpv4(json, "eth_ip",    tmp.eth_ip);
     (void)jsonGetIpv4(json, "eth_sn",    tmp.eth_sn);
     (void)jsonGetIpv4(json, "eth_gw",    tmp.eth_gw);

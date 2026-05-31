@@ -54,11 +54,12 @@
 
 #include "socket.h"
 #include "dns.h"
+#include "debug_uart_c.h"
 
 /* STM32 guard: IWDG feed + hard timeout inside DNS_run busy-wait loop */
 #include "stm32f4xx_hal.h"
 #define DNS_IWDG_FEED()    do { IWDG->KR = 0xAAAAU; } while(0)
-#define DNS_LOOP_GUARD_MS  10000UL
+#define DNS_LOOP_GUARD_MS  4000UL   /* снижено 10000→4000: 4 попытки × 4с = 16с макс */
 
 #ifdef _DNS_DEBUG_
 #include <stdio.h>
@@ -542,7 +543,11 @@ int8_t DNS_run(uint8_t * dns_ip, uint8_t * name, uint8_t * ip_from_dns) {
 #endif
 
     // Socket open
-    socket(DNS_SOCKET, Sn_MR_UDP, 0, 0);
+    int8_t sock_ret = socket(DNS_SOCKET, Sn_MR_UDP, 0, 0);
+    { uint8_t sipr[4]; uint8_t gar[4]; getSIPR(sipr); getGAR(gar);
+      uart_log_info("DNS_run: socket=%d SR=0x%02X TX_FSR=%u SIPR=%d.%d.%d.%d GAR=%d.%d.%d.%d",
+        (int)sock_ret, getSn_SR(DNS_SOCKET), (unsigned)getSn_TX_FSR(DNS_SOCKET),
+        sipr[0],sipr[1],sipr[2],sipr[3], gar[0],gar[1],gar[2],gar[3]); }
 
 #ifdef _DNS_DEBUG_
     printf("> DNS Query to DNS Server : %d.%d.%d.%d\r\n", dns_ip[0], dns_ip[1], dns_ip[2], dns_ip[3]);
@@ -552,9 +557,13 @@ int8_t DNS_run(uint8_t * dns_ip, uint8_t * name, uint8_t * ip_from_dns) {
 #if 1
     // 20231016 taylor//teddy 240122
 #if ((_WIZCHIP_ == 6100) || (_WIZCHIP_ == 6300))
-    sendto(DNS_SOCKET, pDNSMSG, len, dns_ip, IPPORT_DOMAIN, 4);
+    { int32_t sr = sendto(DNS_SOCKET, pDNSMSG, len, dns_ip, IPPORT_DOMAIN, 4);
+      uart_log_info("DNS_run: sendto r=%ld dst=%d.%d.%d.%d", sr,
+          dns_ip[0],dns_ip[1],dns_ip[2],dns_ip[3]); }
 #else
-    sendto(DNS_SOCKET, pDNSMSG, len, dns_ip, IPPORT_DOMAIN);
+    { int32_t sr = sendto(DNS_SOCKET, pDNSMSG, len, dns_ip, IPPORT_DOMAIN);
+      uart_log_info("DNS_run: sendto r=%ld dst=%d.%d.%d.%d", sr,
+          dns_ip[0],dns_ip[1],dns_ip[2],dns_ip[3]); }
 #endif
 #else
     sendto(DNS_SOCKET, pDNSMSG, len, dns_ip, IPPORT_DOMAIN);

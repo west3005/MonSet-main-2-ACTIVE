@@ -124,9 +124,10 @@ static bool resolveHost(const char* host, uint8_t outIp[4]) {
         }
         // r==0 (pending/no answer) или r<0 (error): проверяем guard только здесь
         if (r == 0 && elapsed >= ATTEMPT_GUARD_MS) {
-            DBG.error("DNS: no answer after %lums, abort", (unsigned long)elapsed);
+            DBG.warn("DNS: attempt %d no answer (%lums), trying next server",
+                     (int)attempt + 1, (unsigned long)elapsed);
             close(1);
-            break;
+            continue;  /* не abort — переходим к fallback 8.8.8.8 / 1.1.1.1 */
         }
         if (r < 0) {
             DBG.error("DNS: DNS_run error r=%d", (int)r);
