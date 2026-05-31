@@ -384,6 +384,10 @@ static void parseRtuDeviceCfg(const char* obj, ModbusDeviceCfg& d) {
     jsonGetU8  (obj, "rc", d.reg_count);
     jsonGetF32 (obj, "sc", d.scale);
     jsonGetF32 (obj, "of", d.offset);
+    // Этап 3: divider — аналог ocean-station ScalingConfig.divider
+    // Если поле отсутствует в JSON — остаётся default 1.0 (обратная совместимость)
+    jsonGetF32 (obj, "dv", d.divider);
+    if (d.divider == 0.0f) d.divider = 1.0f; // защита от деления на ноль
     jsonGetString(obj, "un", d.unit, sizeof(d.unit));
     jsonGetU8  (obj, "ci", d.channel_idx);
     char dtStr[16]{};
