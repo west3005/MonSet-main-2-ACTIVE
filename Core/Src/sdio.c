@@ -21,18 +21,13 @@ bool MX_SDIO_SD_Init(void)
     hsd.Init.HardwareFlowControl = SDIO_HARDWARE_FLOW_CONTROL_DISABLE; /* STM32F4 errata: HWFC causes TXUNDERR in polling mode */
     hsd.Init.ClockDiv        = 118U; /* 48MHz/(118+2) = 400 кГц */
 
-    /* uart_log_info("[SDIO] CLKCR=0x%08lX RCC_APB2ENR=0x%08lX", */
-                  (unsigned long)SDIO->CLKCR,
-                  (unsigned long)RCC->APB2ENR);
+    (void)0 /* uart_log_info silenced */
 
     /* Три попытки с нарастающим delay */
     for (int attempt = 1; attempt <= 3; attempt++) {
         HAL_SD_DeInit(&hsd);
         HAL_StatusTypeDef hs = HAL_SD_Init(&hsd);
-        /* uart_log_info("[SDIO] attempt %d: HAL=%d State=%d STA=0x%08lX ErrorCode=0x%08lX", */
-                      attempt, (int)hs, (int)hsd.State,
-                      (unsigned long)SDIO->STA,
-                      (unsigned long)hsd.ErrorCode);
+        (void)0 /* uart_log_info silenced */
         if (hs == HAL_OK) {
             goto init_ok;
         }
@@ -51,6 +46,6 @@ init_ok:
      * лишняя и может давать timeout если карта не готова немедленно.
      * Пропускаем — шина уже 1-bit после инициализации.
      */
-    /* uart_log_info("[SDIO] init OK (1-bit, no ConfigWideBus needed)"); */
+    (void)0 /* uart_log_info silenced */
     return true;
 }
