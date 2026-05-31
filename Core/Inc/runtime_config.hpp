@@ -233,8 +233,10 @@ struct ModbusDeviceCfg {
     uint8_t  reg_count     = 2;     ///< Number of consecutive registers to read
     uint8_t  func_code     = 3;     ///< Modbus function: 3=Read Holding, 4=Read Input
     uint8_t  data_type     = 0;     ///< 0=INT16, 1=UINT16, 2=INT32_BE, 3=UINT32_BE, 4=FLOAT32_BE
-    float    scale         = 1.0f;  ///< Multiplicative scale applied to raw register value
-    float    offset        = 0.0f;  ///< Additive offset applied after scale
+    float    scale         = 1.0f;  ///< Multiplicative scale (= multiplier) applied to raw value
+    float    offset        = 0.0f;  ///< Additive offset (= reference_level) subtracted after scale/divider
+    float    divider       = 1.0f;  ///< Divisor applied after scale: val = (scale * raw) / divider - offset
+                                    ///< Аналог ocean-station ScalingConfig.divider. Default 1.0 — обратная совместимость.
     uint8_t  channel_idx   = 0;     ///< Destination channel index in the telemetry payload
 };
 
