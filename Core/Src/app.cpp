@@ -58,7 +58,8 @@ extern "C" {
 #define MAX_AVG_SAMPLES   60                  ///< максимум отсчётов на интервал
 #endif
 
-static float   s_avgBuf[MAX_AVG_CHANNELS][MAX_AVG_SAMPLES]{};
+/// Буфер усреднения в CCMRAM — не занимает основной RAM (STM32F407, 64KB CCMRAM)
+static float   s_avgBuf[MAX_AVG_CHANNELS][MAX_AVG_SAMPLES] __attribute__((section(".ccmram"))) {};
 static uint8_t s_avgCount[MAX_AVG_CHANNELS]{};
 
 /// Добавить значение val в буфер канала ch
@@ -628,6 +629,7 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
     if(invalid) needSync=true;
     else if(lastSy==0) needSync=true;
     else if((nowSec-lastSy)>=c.ntp_resync_sec) needSync=true;
+    (void)needSync; ///< TODO: используется в следующей итерации рефакторинга NTP-логики
     else {if(verbose) DBG.info("[%s] NTP: skip",tag); return false;}
     if(!c.eth_enabled||!ensureEthReady()) return false;
     uint32_t unixSec=0;
