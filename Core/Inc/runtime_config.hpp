@@ -450,7 +450,12 @@ struct RuntimeConfig
     uint8_t avg_count = 1; ///< Sample average count (legacy; superseded by meas.avg_count)
 
     // --- Backup send interval (legacy) ---
-    uint32_t backup_send_interval_sec = 600; ///< Backup retry period (legacy)
+    uint32_t backup_send_interval_sec = 600;     ///< Backup retry period (legacy, общий fallback)
+    // Этап 6: раздельные таймеры retry — аналог ocean-station
+    // retry_all_backups_in_directory (60 сек) и retry_iridium_backups_in_directory (600 сек)
+    // 0 = использовать backup_send_interval_sec как fallback
+    uint32_t backup_retry_gsm_sec     = 60;      ///< Retry backup via GSM/ETH (ocean-station: 60 сек)
+    uint32_t backup_retry_iridium_sec = 600;     ///< Retry backup via Iridium (ocean-station: 600 сек)
 
     // --- Battery threshold (legacy) ---
     uint8_t battery_low_pct = 20; ///< Battery low % threshold (legacy; superseded by alerts.battery_low_threshold_pct)
