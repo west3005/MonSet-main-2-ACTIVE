@@ -810,6 +810,7 @@ HAL_StatusTypeDef HAL_SD_WriteBlocks(SD_HandleTypeDef *hsd, uint8_t *pData, uint
     return HAL_ERROR;
   }
 
+sd_write_entry:
   if(hsd->State == HAL_SD_STATE_READY)
   {
     hsd->ErrorCode = HAL_SD_ERROR_NONE;
@@ -1006,8 +1007,19 @@ HAL_StatusTypeDef HAL_SD_WriteBlocks(SD_HandleTypeDef *hsd, uint8_t *pData, uint
   }
   else
   {
-    hsd->ErrorCode |= HAL_SD_ERROR_BUSY;
-    return HAL_ERROR;
+    /* State != READY: polling write (no DMA/IT) может оставить State=BUSY
+     * при ошибке (TXUNDERR), т.к. IRQHandler не сбрасывает State
+     * для SD_CONTEXT_WRITE_SINGLE_BLOCK без SD_CONTEXT_IT/DMA флагов.
+     * Ждём до 50 мс и повторяем вход. */
+    uint32_t _t = HAL_GetTick();
+    while (hsd->State != HAL_SD_STATE_READY && (HAL_GetTick() - _t) < 50U) {
+      HAL_Delay(1);
+    }
+    if (hsd->State != HAL_SD_STATE_READY) {
+      hsd->ErrorCode |= HAL_SD_ERROR_BUSY;
+      return HAL_ERROR;
+    }
+    goto sd_write_entry;
   }
 }
 
