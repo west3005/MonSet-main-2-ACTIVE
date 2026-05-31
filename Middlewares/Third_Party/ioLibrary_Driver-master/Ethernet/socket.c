@@ -54,6 +54,9 @@
 //
 //*****************************************************************************
 #include "socket.h"
+#include "stm32f4xx_hal.h"  /* HAL_GetTick для timeout-guard в while-loop */
+#define SOCK_WAIT_MS  50U   /* максимальное ожидание одного W5500 команды */
+#define SOCK_WAIT(cond) do { uint32_t _t0=HAL_GetTick();     while((cond) && (HAL_GetTick()-_t0)<SOCK_WAIT_MS); } while(0)
 
 //M20150401 : Typing Error
 //#define SOCK_ANY_PORT_NUM  0xC000;
@@ -334,7 +337,7 @@ int8_t socket(uint8_t sn, uint8_t protocol, uint16_t port, uint8_t flag) {
     }
     setSn_PORTR(sn, port);
     setSn_CR(sn, Sn_CR_OPEN);
-    while (getSn_CR(sn));
+    SOCK_WAIT(getSn_CR(sn));
     //A20150401 : For release the previous sock_io_mode
     sock_io_mode &= ~(1 << sn);
     //
@@ -349,7 +352,7 @@ int8_t socket(uint8_t sn, uint8_t protocol, uint16_t port, uint8_t flag) {
     //sock_pack_info[sn] = 0;
     sock_pack_info[sn] = PACK_COMPLETED;//PACK_COMPLETED //TODO::need verify:LINAN 20250421
     //
-    while (getSn_SR(sn) == SOCK_CLOSED);
+    SOCK_WAIT(getSn_SR(sn) == SOCK_CLOSED);
     return (int8_t)sn;
 }
 
@@ -374,14 +377,14 @@ int8_t close(uint8_t sn) {
         setSn_MR(sn, Sn_MR_UDP);
         setSn_PORTR(sn, 0x3000);
         setSn_CR(sn, Sn_CR_OPEN);
-        while (getSn_CR(sn) != 0);
-        while (getSn_SR(sn) != SOCK_UDP);
+        SOCK_WAIT(getSn_CR(sn) != 0);
+        SOCK_WAIT(getSn_SR(sn) != SOCK_UDP);
         sendto(sn, destip, 1, destip, 0x3000); // send the dummy data to an unknown destination(0.0.0.1).
     };
 #endif
     setSn_CR(sn, Sn_CR_CLOSE);
     /* wait to process the command... */
-    while (getSn_CR(sn));
+    SOCK_WAIT(getSn_CR(sn));
     /* clear all interrupt of SOCKETn. */
     setSn_IR(sn, 0xFF);
     //A20150401 : Release the sock_io_mode of socket n.
@@ -390,7 +393,7 @@ int8_t close(uint8_t sn) {
     sock_is_sending &= ~(1 << sn);
     sock_remained_size[sn] = 0;
     sock_pack_info[sn] = PACK_NONE;
-    while (getSn_SR(sn) != SOCK_CLOSED);
+    SOCK_WAIT(getSn_SR(sn) != SOCK_CLOSED);
     return SOCK_OK;
 }
 
@@ -399,7 +402,7 @@ int8_t listen(uint8_t sn) {
     CHECK_TCPMODE();
     CHECK_SOCKINIT();
     setSn_CR(sn, Sn_CR_LISTEN);
-    while (getSn_CR(sn));
+    SOCK_WAIT(getSn_CR(sn))
     while (getSn_SR(sn) != SOCK_LISTEN) {
         close(sn);
         return SOCKERR_SOCKCLOSED;
@@ -470,7 +473,7 @@ static int8_t connect_IO_6(uint8_t sn, uint8_t * addr, uint16_t port, uint8_t ad
         //setSn_DPORT(sn,port); //TODO::need verify:LINAN 20250421
         setSn_CR(sn, Sn_CR_CONNECT);
     }
-    while (getSn_CR(sn));
+    SOCK_WAIT(getSn_CR(sn))
     if (sock_io_mode & (1 << sn)) {
         return SOCK_BUSY;
     }
@@ -494,7 +497,7 @@ int8_t disconnect(uint8_t sn) {
     if (getSn_SR(sn) != SOCK_CLOSED) {
         setSn_CR(sn, Sn_CR_DISCON);
         /* wait to process the command... */
-        while (getSn_CR(sn));
+        SOCK_WAIT(getSn_CR(sn))
         sock_is_sending &= ~(1 << sn);
         if (sock_io_mode & (1 << sn)) {
             return SOCK_BUSY;
@@ -537,7 +540,7 @@ int32_t send(uint8_t sn, uint8_t * buf, uint16_t len) {
 #if _WIZCHIP_ == 5200
             if (getSn_TX_RD(sn) != sock_next_rd[sn]) {
                 setSn_CR(sn, Sn_CR_SEND);
-                while (getSn_CR(sn));
+                SOCK_WAIT(getSn_CR(sn))
                 return SOCK_BUSY;
             }
 #endif
@@ -596,7 +599,7 @@ int32_t send(uint8_t sn, uint8_t * buf, uint16_t len) {
     }
     setSn_CR(sn, Sn_CR_SEND);
 
-    while (getSn_CR(sn));  // wait to process the command...
+    SOCK_WAIT(getSn_CR(sn))  // wait to process the command...
     sock_is_sending |= (1 << sn);
 
     return len;
@@ -627,7 +630,7 @@ int32_t send(uint8_t sn, uint8_t * buf, uint16_t len) {
     wiz_send_data(sn, buf, len);
     setSn_CR(sn, Sn_CR_SEND);
 
-    while (getSn_CR(sn));  // wait to process the command...
+    SOCK_WAIT(getSn_CR(sn))  // wait to process the command...
     sock_is_sending |= (1 << sn);
 
     return len;
@@ -725,7 +728,7 @@ int32_t recv(uint8_t sn, uint8_t * buf, uint16_t len) { //lihan
     if (recvsize != 0) {
         wiz_recv_data(sn, buf, recvsize);
         setSn_CR(sn, Sn_CR_RECV);
-        while (getSn_CR(sn));
+        SOCK_WAIT(getSn_CR(sn))
     }
     sock_remained_size[sn] -= recvsize;
     if (sock_remained_size[sn] != 0) {
@@ -746,7 +749,7 @@ int32_t recv(uint8_t sn, uint8_t * buf, uint16_t len) { //lihan
     }
     wiz_recv_data(sn, buf, len);
     setSn_CR(sn, Sn_CR_RECV);
-    while (getSn_CR(sn));
+    SOCK_WAIT(getSn_CR(sn))
 #endif
 
     //M20150409 : Explicit Type Casting
@@ -890,7 +893,7 @@ static int32_t sendto_IO_6(uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * ad
     setSn_CR(sn, Sn_CR_SEND);
 #endif
     /* wait to process the command... */
-    while (getSn_CR(sn));
+    SOCK_WAIT(getSn_CR(sn))
     while (1) {
         tmp = getSn_IR(sn);
         if (tmp & Sn_IR_SENDOK) {
@@ -1005,7 +1008,7 @@ static int32_t recvfrom_IO_6(uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * 
     /* First read 2 bytes of PACKET INFO in SOCKETn RX buffer*/
     wiz_recv_data(sn, head, 2);
     setSn_CR(sn, Sn_CR_RECV);
-    while (getSn_CR(sn));
+    SOCK_WAIT(getSn_CR(sn))
     pack_len = head[0] & 0x07;
     pack_len = (pack_len << 8) + head[1];
 #endif
@@ -1030,13 +1033,13 @@ static int32_t recvfrom_IO_6(uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * 
         wiz_recv_data(sn, addr, *addrlen);
         setSn_CR(sn, Sn_CR_RECV);
 
-        while (getSn_CR(sn));
+        SOCK_WAIT(getSn_CR(sn))
 
 #else
         if (sock_remained_size[sn] == 0) {
             wiz_recv_data(sn, head, 8);
             setSn_CR(sn, Sn_CR_RECV);
-            while (getSn_CR(sn));
+            SOCK_WAIT(getSn_CR(sn))
             // read peer's IP address, port number & packet length
             //A20150601 : For W5300
 #if _WIZCHIP_ == 5300
@@ -1090,7 +1093,7 @@ static int32_t recvfrom_IO_6(uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * 
 #ifndef IPV6_AVAILABLE
             wiz_recv_data(sn, head, 2);
             setSn_CR(sn, Sn_CR_RECV);
-            while (getSn_CR(sn));
+            SOCK_WAIT(getSn_CR(sn))
 #endif
             // read peer's IP address, port number & packet length
             sock_remained_size[sn] = head[0];
@@ -1122,7 +1125,7 @@ static int32_t recvfrom_IO_6(uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * 
 #ifndef IPV6_AVAILABLE
             wiz_recv_data(sn, head, 6);
             setSn_CR(sn, Sn_CR_RECV);
-            while (getSn_CR(sn));
+            SOCK_WAIT(getSn_CR(sn))
             addr[0] = head[0];
             addr[1] = head[1];
             addr[2] = head[2];
@@ -1153,7 +1156,7 @@ static int32_t recvfrom_IO_6(uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * 
             }
             wiz_recv_data(sn, addr, *addrlen);
             setSn_CR(sn, Sn_CR_RECV);
-            while (getSn_CR(sn));
+            SOCK_WAIT(getSn_CR(sn))
 
 #endif
         }
@@ -1174,7 +1177,7 @@ static int32_t recvfrom_IO_6(uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * 
         wiz_recv_data(sn, head, 2);
         *port = (((((uint16_t)head[0])) << 8) + head[1]);
         setSn_CR(sn, Sn_CR_RECV);
-        while (getSn_CR(sn));
+        SOCK_WAIT(getSn_CR(sn))
     }
 
     if (len < sock_remained_size[sn]) {
@@ -1185,7 +1188,7 @@ static int32_t recvfrom_IO_6(uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * 
     wiz_recv_data(sn, buf, pack_len);
     setSn_CR(sn, Sn_CR_RECV);
     /* wait to process the command... */
-    while (getSn_CR(sn)) ;
+    SOCK_WAIT(getSn_CR(sn))
 
     sock_remained_size[sn] -= pack_len;
     if (sock_remained_size[sn] != 0) {
@@ -1197,7 +1200,7 @@ static int32_t recvfrom_IO_6(uint8_t sn, uint8_t * buf, uint16_t len, uint8_t * 
 #else
     setSn_CR(sn, Sn_CR_RECV);
     /* wait to process the command... */
-    while (getSn_CR(sn)) ;
+    SOCK_WAIT(getSn_CR(sn))
     sock_remained_size[sn] -= pack_len;
     //M20150601 :
     //if(sock_remained_size[sn] != 0) sock_pack_info[sn] |= 0x01;
