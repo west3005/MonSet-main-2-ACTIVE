@@ -891,10 +891,7 @@ HAL_StatusTypeDef HAL_SD_WriteBlocks(SD_HandleTypeDef *hsd, uint8_t *pData, uint
 
     /* Write block(s) in polling mode */
     dataremaining = config.DataLength;
-    /* uart_log_info("[HAL_SD] DPSM ON: STA=0x%08lX DCTRL=0x%08lX dataremaining=%lu", */
-                  (unsigned long)hsd->Instance->STA,
-                  (unsigned long)hsd->Instance->DCTRL,
-                  (unsigned long)dataremaining);
+    (void)0 /* uart_log_info silenced */
     uint32_t dbg_iter = 0U;
 #if defined(SDIO_STA_STBITERR)
     while(!__HAL_SD_GET_FLAG(hsd, SDIO_FLAG_TXUNDERR | SDIO_FLAG_DCRCFAIL | SDIO_FLAG_DTIMEOUT | SDIO_FLAG_DATAEND | SDIO_FLAG_STBITERR))
@@ -905,10 +902,7 @@ HAL_StatusTypeDef HAL_SD_WriteBlocks(SD_HandleTypeDef *hsd, uint8_t *pData, uint
       dbg_iter++;
       if(dbg_iter == 1U)
       {
-        /* uart_log_info("[HAL_SD] while#1: STA=0x%08lX TXFIFOHE=%d dataremaining=%lu", */
-                      (unsigned long)hsd->Instance->STA,
-                      (int)__HAL_SD_GET_FLAG(hsd, SDIO_FLAG_TXFIFOHE),
-                      (unsigned long)dataremaining);
+        (void)0 /* uart_log_info silenced */
       }
       if(__HAL_SD_GET_FLAG(hsd, SDIO_FLAG_TXFIFOHE) && (dataremaining > 0U))
       {
