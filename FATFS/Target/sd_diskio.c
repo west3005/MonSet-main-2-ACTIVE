@@ -183,24 +183,26 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
      * Решение: всегда писать одиночными CMD24, по одному блоку за раз.
      * Частота 24 МГц (ClockDiv=0), HWFC=0 (errata STM32F4).
      */
+    /* Write clock: ClockDiv=2 → 48MHz/(2+2)=12MHz — надёжнее для большинства карт */
     MODIFY_REG(SDIO->CLKCR,
                SDIO_CLKCR_CLKDIV | SDIO_CLKCR_CLKEN | SDIO_CLKCR_HWFC_EN | SDIO_CLKCR_BYPASS,
-               (0U) | SDIO_CLKCR_CLKEN);  /* ClockDiv=0 → 24 МГц */
-    HAL_Delay(2);
+               (2U) | SDIO_CLKCR_CLKEN);  /* ClockDiv=2 → 12 МГц */
+    HAL_Delay(5);  /* settle после смены частоты */
 
-    /* Ждём готовности карты ПЕРЕД любой записью —
-     * предыдущая read-операция могла оставить hsd.State=BUSY или CardState=PRG */
+    /* Ждём готовности карты ПЕРЕД любой записью */
     if (SD_WaitCardReady(SD_TIMEOUT) != HAL_OK) {
         uart_log_error("[DISKIO] write: card not ready before write blk=%u", (unsigned)0);
         SD_ClearFlags();
         return RES_ERROR;
     }
-    hsd.State = HAL_SD_STATE_READY;
+    hsd.State = HAL_SD_STATE_READY;  /* форсируем: HAL handle может быть BUSY после read */
+    HAL_Delay(2);  /* extra settle: карта в TRANSFER но внутренние буферы ещё не готовы */
 
     hs = HAL_OK;
     for (UINT blk = 0U; blk < count; blk++) {
         SDIO->DCTRL = 0U;
         __DSB(); __ISB();
+        hsd.State = HAL_SD_STATE_READY;  /* сброс перед каждым блоком */
         hs = HAL_SD_WriteBlocks(&hsd,
                                 (uint8_t *)buff + blk * 512U,
                                 (uint32_t)sector + blk,
@@ -216,12 +218,14 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
             SD_ClearFlags();
             return RES_ERROR;
         }
-        /* Ждём готовности карты перед следующим блоком */
+        /* Ждём готовности карты после каждого блока */
         if (SD_WaitCardReady(SD_TIMEOUT) != HAL_OK) {
             uart_log_error("[DISKIO] write: card not ready after blk=%u", (unsigned)blk);
+            hsd.State = HAL_SD_STATE_READY;
             SD_ClearFlags();
             return RES_ERROR;
         }
+        hsd.State = HAL_SD_STATE_READY;  /* сброс после WaitReady */
     }
 
     return RES_OK;
