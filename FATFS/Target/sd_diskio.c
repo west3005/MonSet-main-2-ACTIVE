@@ -141,8 +141,7 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
     SDIO->DCTRL = 0U;
     __DSB(); __ISB();
 
-    HAL_SD_CardStateTypeDef cs = HAL_SD_GetCardState(&hsd);
-
+    hsd.State = HAL_SD_STATE_READY;  /* форсируем: предыдущая операция могла оставить BUSY */
     hs = HAL_SD_ReadBlocks(&hsd, (uint8_t *)buff,
                            (uint32_t)sector, (uint32_t)count, SD_TIMEOUT);
     if (hs != HAL_OK) {
@@ -161,6 +160,7 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
         SD_ClearFlags();
         return RES_ERROR;
     }
+    hsd.State = HAL_SD_STATE_READY;  /* сброс после read: следующий write не получит HAL_BUSY */
 
     return RES_OK;
 }
