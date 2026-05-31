@@ -90,18 +90,14 @@ DSTATUS SD_initialize(BYTE lun)
     (void)lun;
     Stat = STA_NOINIT;
 
-    (void)0 /* uart_log_info silenced */
 
     /* Если карта уже в TRANSFER — просто фиксируем статус */
     if (HAL_SD_GetCardState(&hsd) == HAL_SD_CARD_TRANSFER) {
-        (void)0 /* uart_log_info silenced */
         Stat = SD_CheckStatus(lun);
-        (void)0 /* uart_log_info silenced */
         return Stat;
     }
 
     /* Полная реинициализация — НЕ делаем DeInit чтобы не трогать RCC/GPIO */
-    (void)0 /* uart_log_info silenced */
     SD_ClearFlags();
 
     /* Переинициализируем HAL без DeInit (GPIO и CLK уже настроены MspInit) */
@@ -111,7 +107,6 @@ DSTATUS SD_initialize(BYTE lun)
         return Stat;
     }
 
-    (void)0 /* uart_log_info silenced */
 
     if (SD_WaitCardReady(2000U) != HAL_OK) {
         uart_log_error("[DISKIO] SD_initialize: WaitCardReady failed");
@@ -123,7 +118,6 @@ DSTATUS SD_initialize(BYTE lun)
     MODIFY_REG(SDIO->CLKCR, SDIO_CLKCR_CLKDIV, 0U);
 
     Stat = SD_CheckStatus(lun);
-    (void)0 /* uart_log_info silenced */
     return Stat;
 }
 
@@ -140,7 +134,6 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
     if (Stat & STA_NOINIT)               { return RES_NOTRDY; }
     if ((buff == NULL) || (count == 0U)) { return RES_PARERR; }
 
-    (void)0 /* uart_log_info silenced */
 
     SD_ClearFlags();
 
@@ -149,7 +142,6 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
     __DSB(); __ISB();
 
     HAL_SD_CardStateTypeDef cs = HAL_SD_GetCardState(&hsd);
-    (void)0 /* uart_log_info silenced */
 
     hs = HAL_SD_ReadBlocks(&hsd, (uint8_t *)buff,
                            (uint32_t)sector, (uint32_t)count, SD_TIMEOUT);
@@ -182,7 +174,6 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
     if (Stat & STA_NOINIT)               { return RES_NOTRDY; }
     if ((buff == NULL) || (count == 0U)) { return RES_PARERR; }
 
-    (void)0 /* uart_log_info silenced */
 
     SD_ClearFlags();
     /*
@@ -230,7 +221,6 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
         return RES_ERROR;
     }
 
-    (void)0 /* uart_log_info silenced */
     return RES_OK;
 }
 #endif
