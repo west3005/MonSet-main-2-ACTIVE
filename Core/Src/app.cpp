@@ -45,46 +45,42 @@ extern "C" {
 #include "w5500.h"
 #include "wizchip_conf.h"
 // ================================================================
-// Буфер усреднения (Этап 2 — агрегация по send_interval)
+// Накопители усреднения (Этап 2 — агрегация по send_interval)
 // Аналог value_buffer: HashMap<metric_id, Vec<f64>> из ocean-station.
-// Без heap — статический C-массив по индексу SensorReading.
-// MAX_AVG_SAMPLES рассчитан на poll_interval=5с, send=12 polls (1 мин)
-// плюс запас. RAM: 16 * 60 * 4 = 3840 байт — приемлемо для STM32F4.
+// Вместо полного массива отсчётов — только sum + count на канал.
+// RAM: 16 * (4 + 1) = 80 байт. Корректное среднее без heap.
 // ================================================================
 #ifndef MAX_AVG_CHANNELS
 #define MAX_AVG_CHANNELS  MAX_MODBUS_ENTRIES  ///< = 16, по числу каналов
 #endif
-#ifndef MAX_AVG_SAMPLES
-#define MAX_AVG_SAMPLES   60                  ///< максимум отсчётов на интервал
-#endif
 
-/// Буфер усреднения в CCMRAM — не занимает основной RAM (STM32F407, 64KB CCMRAM)
-static float   s_avgBuf[MAX_AVG_CHANNELS][MAX_AVG_SAMPLES] __attribute__((section(".ccmram"))) {};
-static uint8_t s_avgCount[MAX_AVG_CHANNELS]{};
+static float   s_avgSum[MAX_AVG_CHANNELS]{};   ///< накопленная сумма по каналу
+static uint8_t s_avgCount[MAX_AVG_CHANNELS]{};  ///< число накопленных отсчётов
 
-/// Добавить значение val в буфер канала ch
+/// Добавить значение val в накопитель канала ch
 static inline void avgPush(uint8_t ch, float val) {
     if (ch >= MAX_AVG_CHANNELS) return;
-    if (s_avgCount[ch] < MAX_AVG_SAMPLES)
-        s_avgBuf[ch][s_avgCount[ch]++] = val;
+    s_avgSum[ch] += val;
+    s_avgCount[ch]++;
 }
 
-/// Вычислить среднее по буферу канала ch (возвращает 0.0 если буфер пуст)
+/// Вычислить среднее по накопителю канала ch (возвращает 0.0 если пусто)
 static inline float avgGet(uint8_t ch) {
     if (ch >= MAX_AVG_CHANNELS || s_avgCount[ch] == 0) return 0.0f;
-    float sum = 0.0f;
-    for (uint8_t i = 0; i < s_avgCount[ch]; i++) sum += s_avgBuf[ch][i];
-    return sum / (float)s_avgCount[ch];
+    return s_avgSum[ch] / (float)s_avgCount[ch];
 }
 
-/// Сбросить буфер канала ch
+/// Сбросить накопитель канала ch
 static inline void avgClear(uint8_t ch) {
-    if (ch < MAX_AVG_CHANNELS) s_avgCount[ch] = 0;
+    if (ch >= MAX_AVG_CHANNELS) return;
+    s_avgSum[ch] = 0.0f; s_avgCount[ch] = 0;
 }
 
-/// Сбросить все буферы
+/// Сбросить все накопители
 static inline void avgClearAll() {
-    for (uint8_t i = 0; i < MAX_AVG_CHANNELS; i++) s_avgCount[i] = 0;
+    for (uint8_t i = 0; i < MAX_AVG_CHANNELS; i++) {
+        s_avgSum[i] = 0.0f; s_avgCount[i] = 0;
+    }
 }
 
 
