@@ -128,6 +128,9 @@ bool W5500Net::tryDhcp(uint32_t timeoutMs)
       m_info = ni;
 
       DBG.info("W5500: DHCP OK %d.%d.%d.%d", ni.ip[0], ni.ip[1], ni.ip[2], ni.ip[3]);
+      DBG.info("W5500: GW  %d.%d.%d.%d", ni.gw[0],  ni.gw[1],  ni.gw[2],  ni.gw[3]);
+      DBG.info("W5500: SN  %d.%d.%d.%d", ni.sn[0],  ni.sn[1],  ni.sn[2],  ni.sn[3]);
+      DBG.info("W5500: DNS %d.%d.%d.%d", ni.dns[0], ni.dns[1], ni.dns[2], ni.dns[3]);
       DHCP_stop();
       return true;
     }
