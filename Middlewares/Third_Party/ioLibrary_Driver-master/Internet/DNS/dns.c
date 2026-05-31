@@ -544,8 +544,10 @@ int8_t DNS_run(uint8_t * dns_ip, uint8_t * name, uint8_t * ip_from_dns) {
 
     // Socket open
     int8_t sock_ret = socket(DNS_SOCKET, Sn_MR_UDP, 0, 0);
-    uart_log_info("DNS_run: socket=%d SR=0x%02X TX_FSR=%u",
-        (int)sock_ret, getSn_SR(DNS_SOCKET), (unsigned)getSn_TX_FSR(DNS_SOCKET));
+    { uint8_t sipr[4]; uint8_t gar[4]; getSIPR(sipr); getGAR(gar);
+      uart_log_info("DNS_run: socket=%d SR=0x%02X TX_FSR=%u SIPR=%d.%d.%d.%d GAR=%d.%d.%d.%d",
+        (int)sock_ret, getSn_SR(DNS_SOCKET), (unsigned)getSn_TX_FSR(DNS_SOCKET),
+        sipr[0],sipr[1],sipr[2],sipr[3], gar[0],gar[1],gar[2],gar[3]); }
 
 #ifdef _DNS_DEBUG_
     printf("> DNS Query to DNS Server : %d.%d.%d.%d\r\n", dns_ip[0], dns_ip[1], dns_ip[2], dns_ip[3]);
