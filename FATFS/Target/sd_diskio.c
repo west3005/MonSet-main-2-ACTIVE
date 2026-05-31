@@ -59,13 +59,19 @@ static HAL_StatusTypeDef SD_WaitCardReady(uint32_t timeout_ms)
     uint32_t t0 = HAL_GetTick();
     HAL_SD_CardStateTypeDef st;
     while ((HAL_GetTick() - t0) < timeout_ms) {
+        /* GetCardState (CMD13) использует hsd внутри и может оставить State=BUSY
+         * если карта медленно отвечает. Форсируем READY до и после каждого вызова. */
+        hsd.State = HAL_SD_STATE_READY;
         st = HAL_SD_GetCardState(&hsd);
+        hsd.State = HAL_SD_STATE_READY;
         if (st == HAL_SD_CARD_TRANSFER) {
             return HAL_OK;
         }
-        HAL_Delay(2);
+        HAL_Delay(5);
     }
+    hsd.State = HAL_SD_STATE_READY;
     st = HAL_SD_GetCardState(&hsd);
+    hsd.State = HAL_SD_STATE_READY;
     uart_log_error("[DISKIO] WaitReady timeout: last CardState=%d hsd.State=%d ErrorCode=0x%08lX",
                    (int)st, (int)hsd.State, (unsigned long)hsd.ErrorCode);
     return HAL_TIMEOUT;
