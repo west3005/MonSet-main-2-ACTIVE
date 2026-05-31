@@ -612,6 +612,19 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
     // Misc
     (void)jsonGetU8 (json, "avg_count",              tmp.avg_count);
     (void)jsonGetU32(json, "backup_send_interval_sec",tmp.backup_send_interval_sec);
+    // Этап 6: раздельные интервалы retry — читаем из JSON, fallback на legacy
+    { uint32_t v=0;
+      if (jsonGetU32(json,"backup_retry_gsm_sec",v) && v>=10)
+          tmp.backup_retry_gsm_sec = v;
+      else if (tmp.backup_retry_gsm_sec == 60 && tmp.backup_send_interval_sec > 0)
+          tmp.backup_retry_gsm_sec = tmp.backup_send_interval_sec;
+    }
+    { uint32_t v=0;
+      if (jsonGetU32(json,"backup_retry_iridium_sec",v) && v>=60)
+          tmp.backup_retry_iridium_sec = v;
+      else if (tmp.backup_retry_iridium_sec == 600 && tmp.backup_send_interval_sec > 0)
+          tmp.backup_retry_iridium_sec = tmp.backup_send_interval_sec;
+    }
     (void)jsonGetU8 (json, "battery_low_pct",         tmp.battery_low_pct);
     (void)jsonGetString(json, "web_user", tmp.web.web_user, sizeof(tmp.web.web_user));
     (void)jsonGetString(json, "web_pass", tmp.web.web_pass, sizeof(tmp.web.web_pass));
