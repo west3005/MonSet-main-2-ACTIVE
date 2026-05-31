@@ -57,6 +57,11 @@ extern "C" {
 static float   s_avgSum[MAX_AVG_CHANNELS]{};   ///< накопленная сумма по каналу
 static uint8_t s_avgCount[MAX_AVG_CHANNELS]{};  ///< число накопленных отсчётов
 
+// Этап 6: раздельные таймеры retry backup — GSM/ETH и Iridium
+// m_lastBackupSendTick (в app.hpp) используется для GSM/ETH
+// s_lastIridiumRetryTick — static, не трогает app.hpp
+static uint32_t s_lastIridiumRetryTick = 0; ///< HAL_GetTick последней попытки Iridium retry
+
 /// Добавить значение val в накопитель канала ch
 static inline void avgPush(uint8_t ch, float val) {
     if (ch >= MAX_AVG_CHANNELS) return;
@@ -771,14 +776,30 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
         checkWebTimeout();
                 processTestSend();
 
-        // Backup retransmit
-        // FIX: проверяем только isMounted() — m_sdOk может быть false
-        // после неудачного appendLine, но backup уже существует и его надо слать
+        // Backup retransmit — Этап 6: раздельные интервалы GSM/ETH и Iridium
+        // GSM/ETH: backup_retry_gsm_sec (default 60, аналог ocean-station retry_all)
+        // Iridium:  backup_retry_iridium_sec (default 600, аналог ocean-station retry_iridium)
         if (m_sdBackup.exists()) {
             uint32_t now = HAL_GetTick();
-            if ((now - m_lastBackupSendTick) >= (Cfg().backup_send_interval_sec * 1000UL)) {
+            const RuntimeConfig& rc = Cfg();
+            // GSM/ETH retry — используем m_lastBackupSendTick (уже в app.hpp)
+            uint32_t gsmInterval = (rc.backup_retry_gsm_sec > 0)
+                ? rc.backup_retry_gsm_sec * 1000UL
+                : rc.backup_send_interval_sec * 1000UL;
+            if ((now - m_lastBackupSendTick) >= gsmInterval) {
                 m_lastBackupSendTick = now;
-                if (!m_webActive) retransmitBackup();
+                if (!m_webActive && !rc.iridium_enabled) retransmitBackup();
+                else if (!m_webActive && !rc.channels.iridium_enabled) retransmitBackup();
+            }
+            // Iridium retry — отдельный static таймер
+            if (rc.iridium_enabled || rc.channels.iridium_enabled) {
+                uint32_t iridInterval = (rc.backup_retry_iridium_sec > 0)
+                    ? rc.backup_retry_iridium_sec * 1000UL
+                    : 600000UL; // fallback 600 сек
+                if ((now - s_lastIridiumRetryTick) >= iridInterval) {
+                    s_lastIridiumRetryTick = now;
+                    if (!m_webActive) retransmitBackup();
+                }
             }
         }
 
