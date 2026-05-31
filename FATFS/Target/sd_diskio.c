@@ -90,13 +90,19 @@ DSTATUS SD_initialize(BYTE lun)
     (void)lun;
     Stat = STA_NOINIT;
 
+    uart_log_info("[DISKIO] SD_initialize: hsd.State=%d CardState=%d",
+                  (int)hsd.State, (int)HAL_SD_GetCardState(&hsd));
+
     /* Если карта уже в TRANSFER — просто фиксируем статус */
     if (HAL_SD_GetCardState(&hsd) == HAL_SD_CARD_TRANSFER) {
+        uart_log_info("[DISKIO] SD_initialize: card already TRANSFER — fast path");
         Stat = SD_CheckStatus(lun);
+        uart_log_info("[DISKIO] SD_initialize: Stat=0x%02X", (unsigned)Stat);
         return Stat;
     }
 
     /* Полная реинициализация — НЕ делаем DeInit чтобы не трогать RCC/GPIO */
+    uart_log_info("[DISKIO] SD_initialize: full reinit path");
     SD_ClearFlags();
 
     /* Переинициализируем HAL без DeInit (GPIO и CLK уже настроены MspInit) */
@@ -105,6 +111,9 @@ DSTATUS SD_initialize(BYTE lun)
         uart_log_error("[DISKIO] SD_initialize: MX_SDIO_SD_Init failed");
         return Stat;
     }
+
+    uart_log_info("[DISKIO] SD_initialize: after MX_Init: hsd.State=%d CardState=%d",
+                  (int)hsd.State, (int)HAL_SD_GetCardState(&hsd));
 
     if (SD_WaitCardReady(2000U) != HAL_OK) {
         uart_log_error("[DISKIO] SD_initialize: WaitCardReady failed");
@@ -116,6 +125,8 @@ DSTATUS SD_initialize(BYTE lun)
     MODIFY_REG(SDIO->CLKCR, SDIO_CLKCR_CLKDIV, 0U);
 
     Stat = SD_CheckStatus(lun);
+    uart_log_info("[DISKIO] SD_initialize: done Stat=0x%02X ClockDiv=%lu",
+                  (unsigned)Stat, (unsigned long)(SDIO->CLKCR & 0xFF));
     return Stat;
 }
 
@@ -132,13 +143,21 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
     if (Stat & STA_NOINIT)               { return RES_NOTRDY; }
     if ((buff == NULL) || (count == 0U)) { return RES_PARERR; }
 
+    uart_log_info("[DISKIO] read: sec=%lu cnt=%u", (unsigned long)sector, (unsigned)count);
+
     SD_ClearFlags();
 
     /* Сброс data path перед новой транзакцией */
     SDIO->DCTRL = 0U;
     __DSB(); __ISB();
 
-    (void)HAL_SD_GetCardState(&hsd);  /* синхронизация: CMD13 даёт карте время перед ReadBlocks */
+    HAL_SD_CardStateTypeDef cs = HAL_SD_GetCardState(&hsd);
+    uart_log_info("[DISKIO] read pre: CLKCR=0x%08lX CardState=%d RESP1=0x%08lX CardType=%lu RCA=0x%04lX",
+                  (unsigned long)SDIO->CLKCR,
+                  (int)cs,
+                  (unsigned long)SDIO->RESP1,
+                  (unsigned long)hsd.SdCard.CardType,
+                  (unsigned long)hsd.SdCard.RelCardAdd);
 
     hs = HAL_SD_ReadBlocks(&hsd, (uint8_t *)buff,
                            (uint32_t)sector, (uint32_t)count, SD_TIMEOUT);
@@ -171,18 +190,21 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
     if (Stat & STA_NOINIT)               { return RES_NOTRDY; }
     if ((buff == NULL) || (count == 0U)) { return RES_PARERR; }
 
+    uart_log_info("[DISKIO] write: sec=%lu cnt=%u CardState=%d",
+                  (unsigned long)sector, (unsigned)count,
+                  (int)HAL_SD_GetCardState(&hsd));
+
     SD_ClearFlags();
     /*
      * TXUNDERR fix: STM32F4 polling write не поддерживает CMD25 (multiblock).
      * При CMD25 карта переходит в PRG после каждого блока — DPSM продолжает
      * тактировать шину пока карта не принимает → TXUNDERR на блоке 2+.
      * Решение: всегда писать одиночными CMD24, по одному блоку за раз.
-     * Частота 12 МГц (ClockDiv=2), HWFC=0 (errata STM32F4).
-     * ClockDiv=0 (24МГц) вызывает TXUNDERR в polling mode — CPU не успевает заполнять FIFO.
+     * Частота 24 МГц (ClockDiv=0), HWFC=0 (errata STM32F4).
      */
     MODIFY_REG(SDIO->CLKCR,
                SDIO_CLKCR_CLKDIV | SDIO_CLKCR_CLKEN | SDIO_CLKCR_HWFC_EN | SDIO_CLKCR_BYPASS,
-               (2U) | SDIO_CLKCR_CLKEN);  /* ClockDiv=2 → 12 МГц (polling TXUNDERR fix: CPU не успевает при 24МГц) */
+               (0U) | SDIO_CLKCR_CLKEN);  /* ClockDiv=0 → 24 МГц */
     HAL_Delay(2);
 
     hs = HAL_OK;
@@ -217,6 +239,8 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
         SD_ClearFlags();
         return RES_ERROR;
     }
+
+    uart_log_info("[DISKIO] write: OK");
     return RES_OK;
 }
 #endif
