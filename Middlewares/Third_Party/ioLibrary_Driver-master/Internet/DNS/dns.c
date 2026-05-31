@@ -58,7 +58,7 @@
 /* STM32 guard: IWDG feed + hard timeout inside DNS_run busy-wait loop */
 #include "stm32f4xx_hal.h"
 #define DNS_IWDG_FEED()    do { IWDG->KR = 0xAAAAU; } while(0)
-#define DNS_LOOP_GUARD_MS  10000UL
+#define DNS_LOOP_GUARD_MS  4000UL   /* снижено 10000→4000: 4 попытки × 4с = 16с макс */
 
 #ifdef _DNS_DEBUG_
 #include <stdio.h>
