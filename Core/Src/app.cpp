@@ -629,8 +629,8 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
     if(invalid) needSync=true;
     else if(lastSy==0) needSync=true;
     else if((nowSec-lastSy)>=c.ntp_resync_sec) needSync=true;
-    (void)needSync; ///< TODO: используется в следующей итерации рефакторинга NTP-логики
     else {if(verbose) DBG.info("[%s] NTP: skip",tag); return false;}
+    (void)needSync; ///< suppress -Wunused-but-set-variable
     if(!c.eth_enabled||!ensureEthReady()) return false;
     uint32_t unixSec=0;
     if(!sntpGetUnixTime(c.ntp_host,unixSec)) return false;
