@@ -177,11 +177,12 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
      * При CMD25 карта переходит в PRG после каждого блока — DPSM продолжает
      * тактировать шину пока карта не принимает → TXUNDERR на блоке 2+.
      * Решение: всегда писать одиночными CMD24, по одному блоку за раз.
-     * Частота 24 МГц (ClockDiv=0), HWFC=0 (errata STM32F4).
+     * Частота 12 МГц (ClockDiv=2), HWFC=0 (errata STM32F4).
+     * ClockDiv=0 (24МГц) вызывает TXUNDERR в polling mode — CPU не успевает заполнять FIFO.
      */
     MODIFY_REG(SDIO->CLKCR,
                SDIO_CLKCR_CLKDIV | SDIO_CLKCR_CLKEN | SDIO_CLKCR_HWFC_EN | SDIO_CLKCR_BYPASS,
-               (0U) | SDIO_CLKCR_CLKEN);  /* ClockDiv=0 → 24 МГц */
+               (2U) | SDIO_CLKCR_CLKEN);  /* ClockDiv=2 → 12 МГц (polling TXUNDERR fix: CPU не успевает при 24МГц) */
     HAL_Delay(2);
 
     hs = HAL_OK;
