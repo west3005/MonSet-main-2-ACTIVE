@@ -75,15 +75,12 @@ static bool resolveHost(const char* host, uint8_t outIp[4]) {
     DBG.info("DNS: resolving [%s] via %u.%u.%u.%u",
              host, ni.dns[0],ni.dns[1],ni.dns[2],ni.dns[3]);
 
-    /* fix: два независимых дефекта исправлены:
-     * 1. close(1) перед DNS_init — гарантируем что UDP сокет свободен
-     * 2. guard timeout (elapsed >= GUARD) применяется только при r==0 (DNS_run pending/hang).
-     *    При r==1 DNS_run вернул "успех" — guard не должен прерывать попытки,
-     *    даже если elapsed > GUARD (медленная сеть). Если при этом ip=={0,0,0,0}
-     *    (баг ioLibrary: r=1 но буфер не заполнен) — делаем retry без abort.
-     * 3. ATTEMPT_GUARD_MS увеличен до 25с — DNS в плохой сети законно занимает >7с. */
+    /* fix: ATTEMPT_GUARD_MS снижен 25000→8000ms.
+     * После fix DNS_time_handler (1мс*1000=1с), DNS_run max = MAX_DNS_RETRY(2)*DNS_WAIT_TIME(3)*1с = 6с.
+     * 3 попытки * 8с = 24с < IWDG timeout(32с) — безопасно.
+     * IWDG_FEED() между попытками (в начале цикла) не даёт WDG сработать. */
     static const uint8_t  MAX_ATTEMPTS = 3;
-    static const uint32_t ATTEMPT_GUARD_MS = 25000UL;
+    static const uint32_t ATTEMPT_GUARD_MS = 8000UL;
 
     for (uint8_t attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         IWDG_FEED();
