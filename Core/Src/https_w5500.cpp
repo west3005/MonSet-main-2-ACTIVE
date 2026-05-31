@@ -79,8 +79,10 @@ static bool resolveHost(const char* host, uint8_t outIp[4]) {
      * После fix DNS_time_handler (1мс*1000=1с), DNS_run max = MAX_DNS_RETRY(2)*DNS_WAIT_TIME(3)*1с = 6с.
      * 3 попытки * 8с = 24с < IWDG timeout(32с) — безопасно.
      * IWDG_FEED() между попытками (в начале цикла) не даёт WDG сработать. */
-    static const uint8_t  MAX_ATTEMPTS = 3;
+    static const uint8_t  MAX_ATTEMPTS = 4;
     static const uint32_t ATTEMPT_GUARD_MS = 8000UL;
+    /* Fallback DNS servers: attempt 0,1 → DHCP DNS; 2 → 8.8.8.8; 3 → 1.1.1.1 */
+    static const uint8_t FALLBACK_DNS[2][4] = {{8,8,8,8},{1,1,1,1}};
 
     for (uint8_t attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         IWDG_FEED();
@@ -89,9 +91,18 @@ static bool resolveHost(const char* host, uint8_t outIp[4]) {
         HAL_Delay(5);
         DNS_init(1, dnsBuf);
 
+        /* выбираем DNS сервер */
+        uint8_t* dnsToUse = ni.dns;
+        if (attempt == 2) dnsToUse = (uint8_t*)FALLBACK_DNS[0]; /* 8.8.8.8 */
+        if (attempt == 3) dnsToUse = (uint8_t*)FALLBACK_DNS[1]; /* 1.1.1.1 */
+        if (attempt >= 2) {
+            DBG.info("DNS: fallback to %u.%u.%u.%u",
+                     dnsToUse[0],dnsToUse[1],dnsToUse[2],dnsToUse[3]);
+        }
+
         uint8_t ip[4]{};
         uint32_t t0 = HAL_GetTick();
-        int8_t r = DNS_run(ni.dns, (uint8_t*)host, ip);
+        int8_t r = DNS_run(dnsToUse, (uint8_t*)host, ip);
         uint32_t elapsed = HAL_GetTick() - t0;
         IWDG_FEED();
 
