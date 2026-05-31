@@ -90,19 +90,19 @@ DSTATUS SD_initialize(BYTE lun)
     (void)lun;
     Stat = STA_NOINIT;
 
-    uart_log_info("[DISKIO] SD_initialize: hsd.State=%d CardState=%d",
+    /* uart_log_info("[DISKIO] SD_initialize: hsd.State=%d CardState=%d", */
                   (int)hsd.State, (int)HAL_SD_GetCardState(&hsd));
 
     /* Если карта уже в TRANSFER — просто фиксируем статус */
     if (HAL_SD_GetCardState(&hsd) == HAL_SD_CARD_TRANSFER) {
-        uart_log_info("[DISKIO] SD_initialize: card already TRANSFER — fast path");
+        /* uart_log_info("[DISKIO] SD_initialize: card already TRANSFER — fast path"); */
         Stat = SD_CheckStatus(lun);
-        uart_log_info("[DISKIO] SD_initialize: Stat=0x%02X", (unsigned)Stat);
+        /* uart_log_info("[DISKIO] SD_initialize: Stat=0x%02X", (unsigned)Stat); */
         return Stat;
     }
 
     /* Полная реинициализация — НЕ делаем DeInit чтобы не трогать RCC/GPIO */
-    uart_log_info("[DISKIO] SD_initialize: full reinit path");
+    /* uart_log_info("[DISKIO] SD_initialize: full reinit path"); */
     SD_ClearFlags();
 
     /* Переинициализируем HAL без DeInit (GPIO и CLK уже настроены MspInit) */
@@ -112,7 +112,7 @@ DSTATUS SD_initialize(BYTE lun)
         return Stat;
     }
 
-    uart_log_info("[DISKIO] SD_initialize: after MX_Init: hsd.State=%d CardState=%d",
+    /* uart_log_info("[DISKIO] SD_initialize: after MX_Init: hsd.State=%d CardState=%d", */
                   (int)hsd.State, (int)HAL_SD_GetCardState(&hsd));
 
     if (SD_WaitCardReady(2000U) != HAL_OK) {
@@ -125,7 +125,7 @@ DSTATUS SD_initialize(BYTE lun)
     MODIFY_REG(SDIO->CLKCR, SDIO_CLKCR_CLKDIV, 0U);
 
     Stat = SD_CheckStatus(lun);
-    uart_log_info("[DISKIO] SD_initialize: done Stat=0x%02X ClockDiv=%lu",
+    /* uart_log_info("[DISKIO] SD_initialize: done Stat=0x%02X ClockDiv=%lu", */
                   (unsigned)Stat, (unsigned long)(SDIO->CLKCR & 0xFF));
     return Stat;
 }
@@ -143,7 +143,7 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
     if (Stat & STA_NOINIT)               { return RES_NOTRDY; }
     if ((buff == NULL) || (count == 0U)) { return RES_PARERR; }
 
-    uart_log_info("[DISKIO] read: sec=%lu cnt=%u", (unsigned long)sector, (unsigned)count);
+    /* uart_log_info("[DISKIO] read: sec=%lu cnt=%u", (unsigned long)sector, (unsigned)count); */
 
     SD_ClearFlags();
 
@@ -152,7 +152,7 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
     __DSB(); __ISB();
 
     HAL_SD_CardStateTypeDef cs = HAL_SD_GetCardState(&hsd);
-    uart_log_info("[DISKIO] read pre: CLKCR=0x%08lX CardState=%d RESP1=0x%08lX CardType=%lu RCA=0x%04lX",
+    /* uart_log_info("[DISKIO] read pre: CLKCR=0x%08lX CardState=%d RESP1=0x%08lX CardType=%lu RCA=0x%04lX", */
                   (unsigned long)SDIO->CLKCR,
                   (int)cs,
                   (unsigned long)SDIO->RESP1,
@@ -190,7 +190,7 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
     if (Stat & STA_NOINIT)               { return RES_NOTRDY; }
     if ((buff == NULL) || (count == 0U)) { return RES_PARERR; }
 
-    uart_log_info("[DISKIO] write: sec=%lu cnt=%u CardState=%d",
+    /* uart_log_info("[DISKIO] write: sec=%lu cnt=%u CardState=%d", */
                   (unsigned long)sector, (unsigned)count,
                   (int)HAL_SD_GetCardState(&hsd));
 
@@ -240,7 +240,7 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
         return RES_ERROR;
     }
 
-    uart_log_info("[DISKIO] write: OK");
+    /* uart_log_info("[DISKIO] write: OK"); */
     return RES_OK;
 }
 #endif
