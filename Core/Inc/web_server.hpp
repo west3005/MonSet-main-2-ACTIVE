@@ -58,7 +58,7 @@ private:
 
     static constexpr uint16_t HTTP_PORT   = 80;
 
-    static constexpr uint16_t REQ_BUF_SIZE  = 12288;
+    static constexpr uint16_t REQ_BUF_SIZE  = 6144;   // POST /api/config ~4KB max
     char m_reqBuf[REQ_BUF_SIZE];
 
     /**
@@ -66,7 +66,7 @@ private:
      * TX отправка идёт чанками по TX_CHUNK_SIZE, поэтому буфер
      * может быть больше TX буфера W5500.
      */
-    static constexpr uint16_t RESP_BUF_SIZE = 12288;
+    static constexpr uint16_t RESP_BUF_SIZE = 8192;   // handleApiConfig ~3KB max
 
     /**
      * TX_CHUNK_SIZE — размер одного вызова send() в sendResponse.
@@ -98,8 +98,9 @@ private:
     void handleApiConfig(uint8_t sn);
     void handleApiChannels(uint8_t sn);
     void handleApiWebMode(uint8_t sn);
-    void handleApiTestSend(uint8_t sn);
+    void handleApiTestSend(uint8_t sn, const char* queryStr);
     void handleApiTestResult(uint8_t sn);
+    void handleApiTestPayload(uint8_t sn);  ///< GET /api/test_payload — JSON preview
     void handleApiLogs(uint8_t sn, const char* queryStr);
     void handleApiLogsExport(uint8_t sn);   // ← ДОЛЖЕН БЫТЬ ОПРЕДЕЛЁН В CPP
     void handleApiLogsClear(uint8_t sn);

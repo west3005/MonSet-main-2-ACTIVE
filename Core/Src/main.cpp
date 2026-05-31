@@ -144,7 +144,7 @@ extern "C" int main(void)
     DBG.info("APP START");
     DBG.separator();
 
-    App app;
+    static App app;  // static: placed in BSS, not on main() stack (~100KB object)
     app.init();
     app.run();
 

@@ -9,6 +9,7 @@
 
 #include "main.h"
 #include "stm32f4xx_it.h"
+#include "dns.h"
 
 /* USER CODE BEGIN Includes */
 #include "uart_ringbuf.hpp"
@@ -37,21 +38,44 @@ void NMI_Handler(void)
 #include "stm32f4xx_hal.h"
 #include <stdio.h>
 
-void HardFault_Handler(void) {
-    /* Freeze write buffer so IMPRECISERR address is captured */
+/* Extract stacked registers from exception frame for fault diagnosis */
+void HardFault_Impl(uint32_t* sp);
+__attribute__((naked)) void HardFault_Handler(void) {
+    __asm volatile(
+        "tst lr, #4          \n"  /* test EXC_RETURN bit 2: 0=MSP, 1=PSP */
+        "ite eq              \n"
+        "mrseq r0, msp       \n"
+        "mrsne r0, psp       \n"
+        "b HardFault_Impl    \n"
+        :::"r0"
+    );
+}
+void HardFault_Impl(uint32_t* sp) {
     __DSB();
-    char buf[96];
+    uint32_t stacked_r0  = sp[0];
+    uint32_t stacked_r1  = sp[1];
+    uint32_t stacked_r2  = sp[2];
+    uint32_t stacked_r3  = sp[3];
+    uint32_t stacked_r12 = sp[4];
+    uint32_t stacked_lr  = sp[5];
+    uint32_t stacked_pc  = sp[6];
+    uint32_t stacked_xpsr= sp[7];
+    (void)stacked_r0; (void)stacked_r1; (void)stacked_r2; (void)stacked_r3;
+    (void)stacked_r12; (void)stacked_xpsr;
+    char buf[128];
     snprintf(buf, sizeof(buf),
-             "!!! HARDFAULT CFSR=0x%08lX HFSR=0x%08lX SP=0x%08lX\r\n",
+             "!!! HARDFAULT CFSR=0x%08lX HFSR=0x%08lX\r\n"
+             "    PC=0x%08lX LR=0x%08lX SP=0x%08lX\r\n",
              (unsigned long)SCB->CFSR,
              (unsigned long)SCB->HFSR,
-             (unsigned long)__get_MSP());
-    /* Clear fault status registers before reset */
+             (unsigned long)stacked_pc,
+             (unsigned long)stacked_lr,
+             (unsigned long)sp);
     SCB->CFSR = SCB->CFSR;
     SCB->HFSR = SCB->HFSR;
     dbg_puts(buf);
     HAL_Delay(20);
-    NVIC_SystemReset();  /* recovers cleanly; IWDG won't fire on top */
+    NVIC_SystemReset();
 }
 void MemManage_Handler(void)
 {
@@ -115,6 +139,13 @@ void TIM6_DAC_IRQHandler(void)
   /* USER CODE END TIM6_DAC_IRQn 0 */
   HAL_TIM_IRQHandler(&htim6);
   /* USER CODE BEGIN TIM6_DAC_IRQn 1 */
+  /* DNS_time_handler must be called every 1 second.
+   * TIM6 fires every 0.5 ms (168MHz / 84 / 1000), so tick every 2000 calls = 1 sec. */
+  static uint16_t s_dns_tick_cnt = 0;
+  if (++s_dns_tick_cnt >= 2000u) {
+      s_dns_tick_cnt = 0;
+      DNS_time_handler();
+  }
   /* USER CODE END TIM6_DAC_IRQn 1 */
 }
 

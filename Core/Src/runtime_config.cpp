@@ -879,7 +879,7 @@ bool RuntimeConfig::loadFromSd(const char* filename) {
         validateAndFix();
         return false;
     }
-    static char buf[10240];
+    static char buf[6144];   // runtime_config.json max ~5KB
     UINT br = 0;
     fr = f_read(&f, buf, sizeof(buf) - 1, &br);
     f_close(&f);
@@ -923,7 +923,7 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
     ftoa6(sensor_zero_level, zStr, sizeof(zStr));
     ftoa6(sensor_divider,    dStr, sizeof(dStr));
 
-    static char json[20480];
+    static char json[8192];  // saveToSd JSON max ~5KB
     int n = 0;
 
     n += std::snprintf(json+n, sizeof(json)-n,
@@ -1317,12 +1317,22 @@ void RuntimeConfig::buildServerUrl(char* out, size_t outSz) const {
         out[outSz - 1] = 0;
         return;
     }
-    const char* host   = proto.server_host;
-    const char* path   = proto.server_path[0] ? proto.server_path : "/api/ingest";
-    uint16_t    port   = proto.server_port    ? proto.server_port  : 443;
+    const char* host;
+    const char* path;
+    uint16_t    port;
+    // Ocean Monitor использует отдельные поля ocean_host/path/port
+    if (protocol == ProtocolMode::OCEAN_MONITOR) {
+        host = proto.ocean_host;
+        path = proto.ocean_path[0] ? proto.ocean_path : "/api/rest/measures";
+        port = proto.ocean_port    ? proto.ocean_port  : 443;
+    } else {
+        host = proto.server_host;
+        path = proto.server_path[0] ? proto.server_path : "/api/ingest";
+        port = proto.server_port    ? proto.server_port  : 443;
+    }
     if (!host[0]) {
         out[0] = 0;
-        DBG.error("CFG: buildServerUrl failed: empty server_host");
+        DBG.error("CFG: buildServerUrl failed: empty host");
         return;
     }
     const char* scheme = (port == 80) ? "http" : "https";

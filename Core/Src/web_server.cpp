@@ -163,17 +163,16 @@ void WebServer::sendResponse(uint8_t sn, int code, const char* ct,
             "Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
             status, ct, (unsigned)bodyLen);
     }
-    send(sn, (uint8_t*)hdr, (uint16_t)hlen);
+    w5500_send(sn, (uint8_t*)hdr, (uint16_t)hlen);
 
-    /* ── Chunked TX to handle W5500 2KB/socket TX buffer limit ── */
+    /* ── Chunked TX: w5500_send ждёт TX_FSR перед каждым чанком ── */
     uint16_t offset = 0;
     while (offset < bodyLen && body) {
         uint16_t chunk = bodyLen - offset;
         if (chunk > TX_CHUNK_SIZE) chunk = TX_CHUNK_SIZE;
-        int32_t r = send(sn, (uint8_t*)(body + offset), chunk);
-        if (r <= 0) break;
-        offset += (uint16_t)r;
-        IWDG->KR = 0xAAAA;   // кормим watchdog при больших страницах
+        IWDG->KR = 0xAAAA;
+        w5500_send(sn, (uint8_t*)(body + offset), chunk);
+        offset += chunk;
     }
 }
 void WebServer::send401(uint8_t sn){
@@ -4051,8 +4050,19 @@ void WebServer::handleTestPage(uint8_t sn){
     SNCAT("<div class='card'><h3>Target URL</h3>"
           "<div style='font-size:12px;color:#8b949e;word-break:break-all'>%s</div></div>",
           _effUrl); }
+    SNCAT("<div class='card'><h3>JSON Preview</h3>"
+          "<pre id='pv' style='font-size:11px;color:#8b949e;white-space:pre-wrap;word-break:break-all'>...</pre>"
+          "<button onclick='doCopy()' style='margin-top:6px;font-size:12px'>&#128203; Copy JSON</button></div>");
+    SNCAT("<div class='card'>"
+          "<button onclick='doTest()' style='width:100%%'>&#9654; Send Test</button>"
+          "<div id='res' style='margin-top:10px;font-size:13px'></div></div>");
     SNCAT("<script>"
           "var t;"
+          "fetch('/api/test_payload').then(r=>r.text()).then(j=>{"
+          "try{document.getElementById('pv').textContent=JSON.stringify(JSON.parse(j),null,2);}"
+          "catch(e){document.getElementById('pv').textContent=j;}}).catch(()=>{});"
+          "function doCopy(){var s=document.getElementById('pv').textContent;"
+          "navigator.clipboard&&navigator.clipboard.writeText(s).then(()=>alert('Copied!'));}"
           "function doTest(){"
           "if(t)clearInterval(t);"
           "var el=document.getElementById('res');"
@@ -4124,9 +4134,10 @@ void WebServer::handleApiSensors(uint8_t sn){
             "\"battery\":{\"voltage\":0,\"percent\":0,\"low\":false}");
     }
     uint32_t tick = HAL_GetTick() / 1000;
+    uint8_t sensorCnt = m_sensor ? m_sensor->getReadingCount() : 0;
     n+=std::snprintf(m_respBuf+n,RESP_BUF_SIZE-n,
-        ",\"uptime_s\":%lu,\"timestamp\":\"uptime %lu s\"}",
-        (unsigned long)tick,(unsigned long)tick);
+        ",\"count\":%u,\"uptime_s\":%lu,\"timestamp\":\"uptime %lu s\"}",
+        (unsigned)sensorCnt,(unsigned long)tick,(unsigned long)tick);
     if(n<0||n>=(int)RESP_BUF_SIZE) n=RESP_BUF_SIZE-1;
     sendResponse(sn,200,"application/json",m_respBuf,(uint16_t)n);
 }
@@ -4398,7 +4409,26 @@ void WebServer::handleApiWebMode(uint8_t sn){
 }
 
 // ── POST /api/test_send  /  GET /api/test_result ──────────────────────────────
-void WebServer::handleApiTestSend(uint8_t sn){
+// forward declaration — defined later in this file
+static bool getQueryParam(const char* qs, const char* key, char* out, size_t outSz);
+
+void WebServer::handleApiTestSend(uint8_t sn, const char* queryStr){
+    char valStr[32]{};
+    if(queryStr && queryStr[0]){
+        /* inline mini-parser: find "value=NNN" in query string */
+        const char* p = std::strstr(queryStr, "value=");
+        if(p){
+            p += 6; /* skip "value=" */
+            size_t i = 0;
+            while(*p && *p != '&' && i < sizeof(valStr)-1)
+                valStr[i++] = *p++;
+            valStr[i] = '\0';
+        }
+    }
+    if(valStr[0]){
+        float v = (float)std::atof(valStr);
+        if(m_app) m_app->setTestValue(v);
+    }
     if(m_app) m_app->triggerTestSend();
     const char* r="{\"ok\":true}";
     sendResponse(sn,200,"application/json",r,(uint16_t)std::strlen(r));
@@ -4413,6 +4443,17 @@ void WebServer::handleApiTestResult(uint8_t sn){
         "\"http_code\":%d,\"elapsed_ms\":%lu}",
         state,channel,httpCode,(unsigned long)elapsed);
     sendResponse(sn,200,"application/json",buf,(uint16_t)len);
+}
+void WebServer::handleApiTestPayload(uint8_t sn){
+    /* Use m_respBuf (8KB, heap-resident) instead of static 512B buffer —
+     * ocean-monitor JSON array can be >512 bytes for multiple sensors. */
+    int plen = m_app ? m_app->getTestPayload(m_respBuf, RESP_BUF_SIZE) : 0;
+    if(plen<=0){
+        const char* e="{}";
+        sendResponse(sn,200,"application/json",e,(uint16_t)std::strlen(e));
+        return;
+    }
+    sendResponse(sn,200,"application/json",m_respBuf,(uint16_t)plen);
 }
 
 // ── GET /api/logs ─────────────────────────────────────────────────────────────
@@ -4580,16 +4621,10 @@ void WebServer::handlePostConfig(uint8_t sn,const char* body){
 
         Cfg() = tmp;
 
-        char resp[256];
-        if (sdSaved) {
-            std::snprintf(resp, sizeof(resp),
-                "{\"status\":\"ok\",\"saved_to_sd\":true,\"save_target\":\"sd\",\"message\":\"Saved to %s & RAM.\"}",
-                RUNTIME_CONFIG_FILENAME);
-        } else {
-            std::snprintf(resp, sizeof(resp),
-                "{\"status\":\"ok_ram\",\"saved_to_sd\":false,\"save_target\":\"ram\",\"message\":\"Applied in RAM only. SD error!\"}");
-        }
-
+        /* Статические JSON-ответы — без snprintf/буфера, нет риска переполнения */
+        static const char RESP_SD[]  = "{\"status\":\"ok\",\"saved_to_sd\":true}";
+        static const char RESP_RAM[] = "{\"status\":\"ok_ram\",\"saved_to_sd\":false}";
+        const char* resp = sdSaved ? RESP_SD : RESP_RAM;
         sendResponse(sn, 200, "application/json", resp, (uint16_t)std::strlen(resp));
         DBG.info("WebServer: config updated via tmp cfg, sd_saved=%d", (int)sdSaved);
     }else{
@@ -4697,6 +4732,7 @@ void WebServer::handleRequest(uint8_t sn,const char* request,uint16_t reqLen){
         else if(std::strcmp(cleanPath,"/export")==0)      handleExport(sn);
         else if(std::strcmp(cleanPath,"/api/sensors")==0) handleApiSensors(sn);
         else if(std::strcmp(cleanPath,"/api/config")==0)  handleApiConfig(sn);
+        else if(std::strcmp(cleanPath,"/api/test_payload")==0) handleApiTestPayload(sn);
         else if(std::strcmp(cleanPath,"/api/channels")==0)handleApiChannels(sn);
         else if(std::strcmp(cleanPath,"/api/web_mode")==0)handleApiWebMode(sn);
         else if(std::strcmp(cleanPath,"/api/test_result")==0)handleApiTestResult(sn);
@@ -4727,7 +4763,7 @@ void WebServer::handleRequest(uint8_t sn,const char* request,uint16_t reqLen){
         if(std::strcmp(cleanPath,"/config")==0||
            std::strcmp(cleanPath,"/api/config")==0) handlePostConfig(sn,body);
         else if(std::strcmp(cleanPath,"/api/settime")==0)    handleApiSetTime(sn,body);
-        else if(std::strcmp(cleanPath,"/api/test_send")==0)  handleApiTestSend(sn);
+        else if(std::strcmp(cleanPath,"/api/test_send")==0)  handleApiTestSend(sn,queryStr);
         else if(std::strcmp(cleanPath,"/api/logs/clear")==0) handleApiLogsClear(sn);
     else if(std::strcmp(cleanPath,"/api/backup/download")==0) handleApiBackupDownload(sn);
         else if(std::strcmp(cleanPath,"/api/upload")==0)  handleApiUpload(sn,body,request);
@@ -4794,6 +4830,8 @@ void WebServer::handleFiles(uint8_t sn){
 void WebServer::handleApiFiles(uint8_t sn, const char* queryStr, const char* /*request*/){
     char dirPath[64]="0:/";
     getQueryParam(queryStr,"path",dirPath,sizeof(dirPath));
+    // FatFS не принимает "/" как корень — маппируем на "0:/"
+    if(std::strcmp(dirPath,"/")==0 || dirPath[0]=='\0') std::strncpy(dirPath,"0:/",sizeof(dirPath));
 
     char resp[4096]; int n=0;
     n+=std::snprintf(resp+n,sizeof(resp)-n,"{\"path\":\"%s\",\"items\":[",dirPath);
@@ -4994,7 +5032,7 @@ void WebServer::tick(){
                 { uint32_t t0=HAL_GetTick();
                   uint16_t txmax=getSn_TxMAX(HTTP_SOCKET);
                   while(getSn_TX_FSR(HTTP_SOCKET)<txmax &&
-                        (HAL_GetTick()-t0)<3000){ IWDG->KR=0xAAAA; HAL_Delay(2); }
+                        (HAL_GetTick()-t0)<5000){ IWDG->KR=0xAAAA; HAL_Delay(2); }
                 }
                 disconnect(HTTP_SOCKET);
             }

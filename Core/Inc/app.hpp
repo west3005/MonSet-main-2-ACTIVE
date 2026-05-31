@@ -117,6 +117,8 @@ private:
     uint32_t m_testElapsedMs = 0;
     int      m_testHttpCode  = 0;
     char     m_testChannel[16] = "";
+    float    m_testManualValue = 0.0f;  ///< value set via /api/test_send?value=
+    bool     m_testManualSet   = false; ///< true → use m_testManualValue in runTestSend
 
     // ---- Channel status for Modbus TCP Slave ----
     uint8_t m_channelStatus = 0; ///< bit0=ETH,bit1=GSM,bit2=WIFI,bit3=IRIDIUM
@@ -147,6 +149,7 @@ public:
      * @brief Trigger a test send — non-blocking, result polled via getTestResult().
      */
     void triggerTestSend();
+    void setTestValue(float v);  ///< override sensor value for next test send
 
     /**
      * @brief Get test send result for polling.
@@ -156,6 +159,7 @@ public:
      * @param elapsedMs  Output elapsed time in ms
      */
     void getTestResult(char* state, char* channel, int* httpCode, uint32_t* elapsedMs) const;
+    int  getTestPayload(char* buf, size_t bsz);  ///< Build JSON payload preview
 
     /**
      * @brief Get current channel status bitmask (for Modbus TCP Slave).
@@ -213,6 +217,7 @@ private:
     bool sendViaMqtt(const char* json, uint16_t len);
 
     // ---- JSON builders ----
+    int buildOceanPayload(char* buf, size_t bsz, float val, const DateTime& dt);
     int buildPayload(char* buf, size_t bsz,
                      const char* tsStr, float val, const DateTime& dt,
                      bool asArray);
