@@ -75,17 +75,21 @@ static bool resolveHost(const char* host, uint8_t outIp[4]) {
     DBG.info("DNS: resolving [%s] via %u.%u.%u.%u",
              host, ni.dns[0],ni.dns[1],ni.dns[2],ni.dns[3]);
 
-    /* DNS_run() из ioLibrary блокирующий — ждёт до MAX_DNS_RETRY*DNS_WAIT_TIME (6 сек).
-     * Таймер dns_1s_tick инкрементируется в TIM6 ISR (DNS_time_handler).
-     * Сбрасываем dns_1s_tick = 0 перед каждой попыткой — иначе DNS_run может
-     * немедленно выйти по таймауту если предыдущий вызов оставил tick > 0.
-     * Кормим IWDG до и после вызова — DNS_run может занять до 6 сек. */
+    /* fix: два независимых дефекта исправлены:
+     * 1. close(1) перед DNS_init — гарантируем что UDP сокет свободен
+     * 2. guard timeout (elapsed >= GUARD) применяется только при r==0 (DNS_run pending/hang).
+     *    При r==1 DNS_run вернул "успех" — guard не должен прерывать попытки,
+     *    даже если elapsed > GUARD (медленная сеть). Если при этом ip=={0,0,0,0}
+     *    (баг ioLibrary: r=1 но буфер не заполнен) — делаем retry без abort.
+     * 3. ATTEMPT_GUARD_MS увеличен до 25с — DNS в плохой сети законно занимает >7с. */
     static const uint8_t  MAX_ATTEMPTS = 3;
-    static const uint32_t ATTEMPT_GUARD_MS = 7000; // чуть больше 6 сек
+    static const uint32_t ATTEMPT_GUARD_MS = 25000UL;
 
     for (uint8_t attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         IWDG_FEED();
         dns_1s_tick = 0;  // сброс таймера перед запросом
+        close(1);         // fix: освобождаем сокет перед DNS_init
+        HAL_Delay(5);
         DNS_init(1, dnsBuf);
 
         uint8_t ip[4]{};
@@ -94,9 +98,9 @@ static bool resolveHost(const char* host, uint8_t outIp[4]) {
         uint32_t elapsed = HAL_GetTick() - t0;
         IWDG_FEED();
 
-        DBG.info("DNS: attempt %d/%d r=%d elapsed=%lums",
+        DBG.info("DNS: attempt %d/%d r=%d elapsed=%lums ip=%u.%u.%u.%u",
                  (int)attempt+1, (int)MAX_ATTEMPTS, (int)r,
-                 (unsigned long)elapsed);
+                 (unsigned long)elapsed, ip[0],ip[1],ip[2],ip[3]);
 
         if (r == 1 && (ip[0]||ip[1]||ip[2]||ip[3])) {
             std::memcpy(outIp, ip, 4);
@@ -104,11 +108,21 @@ static bool resolveHost(const char* host, uint8_t outIp[4]) {
             close(1); HAL_Delay(20); // освобождаем UDP сокет перед TCP
             return true;
         }
-        // Если застряло дольше guard — прерываем следующие попытки
-        if (elapsed >= ATTEMPT_GUARD_MS) {
-            DBG.error("DNS: guard timeout on attempt %d, abort", (int)attempt+1);
+        if (r == 1) {
+            // r=1 но ip пустой — ioLibrary баг, retry
+            DBG.warn("DNS: r=1 but ip empty, retry");
+            close(1); HAL_Delay(100);
+            continue;
+        }
+        // r==0 (pending/no answer) или r<0 (error): проверяем guard только здесь
+        if (r == 0 && elapsed >= ATTEMPT_GUARD_MS) {
+            DBG.error("DNS: no answer after %lums, abort", (unsigned long)elapsed);
             close(1);
             break;
+        }
+        if (r < 0) {
+            DBG.error("DNS: DNS_run error r=%d", (int)r);
+            close(1); break;
         }
         if (attempt + 1 < MAX_ATTEMPTS) HAL_Delay(200);
     }
