@@ -106,7 +106,10 @@ float SensorReader::readModbusDevice(ModbusRTU& port,
     }
 
     float val = parseModbusRegisters(raw, dev.data_type);
-    val = val * dev.scale + dev.offset;
+    // Этап 3: формула масштабирования — аналог ocean-station ScalingConfig
+    // ocean-station: value = (multiplier * raw) / divider - reference_level
+    // MonSet:        val   = (scale      * raw) / divider - offset
+    val = (val * dev.scale) / dev.divider - dev.offset;
 
     DBG.info("RTU: %s=%.3f %s", dev.name, (double)val, dev.unit);
     return val;
@@ -148,7 +151,12 @@ void SensorReader::pollRtuPorts(const ModbusRtuPortConfig* rtu_ports,
                 slot.value = val;
                 slot.valid = (val > -9998.0f);
 
-                std::strncpy(slot.name, dev.name, sizeof(slot.name) - 1);
+                // Этап 4: приоритет per-device metric_id над именем устройства
+                // Аналог ocean-station: fields[].metric_id → payload metricId
+                // Если metric_id непустой — он идёт в slot.name и затем в payload
+                // Если пустой — используется dev.name (как раньше, обратная совместимость)
+                const char* mid = (dev.metric_id[0] != '\0') ? dev.metric_id : dev.name;
+                std::strncpy(slot.name, mid, sizeof(slot.name) - 1);
                 slot.name[sizeof(slot.name) - 1] = '\0';
 
                 std::strncpy(slot.unit, dev.unit, sizeof(slot.unit) - 1);

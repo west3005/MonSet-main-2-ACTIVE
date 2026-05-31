@@ -140,9 +140,10 @@ void TIM6_DAC_IRQHandler(void)
   HAL_TIM_IRQHandler(&htim6);
   /* USER CODE BEGIN TIM6_DAC_IRQn 1 */
   /* DNS_time_handler must be called every 1 second.
-   * TIM6 fires every 0.5 ms (168MHz / 84 / 1000), so tick every 2000 calls = 1 sec. */
+   * TIM6: Prescaler=83, Period=999, CLK=84MHz -> 84M/84/1000 = 1000 Hz -> 1ms per tick.
+   * fix: было 2000 (=2с) — неверно. Правильно: 1000 тиков = 1 секунда. */
   static uint16_t s_dns_tick_cnt = 0;
-  if (++s_dns_tick_cnt >= 2000u) {
+  if (++s_dns_tick_cnt >= 1000u) {
       s_dns_tick_cnt = 0;
       DNS_time_handler();
   }

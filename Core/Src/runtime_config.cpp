@@ -384,8 +384,15 @@ static void parseRtuDeviceCfg(const char* obj, ModbusDeviceCfg& d) {
     jsonGetU8  (obj, "rc", d.reg_count);
     jsonGetF32 (obj, "sc", d.scale);
     jsonGetF32 (obj, "of", d.offset);
+    // Этап 3: divider — аналог ocean-station ScalingConfig.divider
+    jsonGetF32 (obj, "dv", d.divider);
+    if (d.divider == 0.0f) d.divider = 1.0f; // защита от деления на ноль
     jsonGetString(obj, "un", d.unit, sizeof(d.unit));
     jsonGetU8  (obj, "ci", d.channel_idx);
+    // Этап 4: per-device metric_id и send_interval_polls
+    // аналог ocean-station fields[].metric_id и send_interval_sec
+    jsonGetString(obj, "mi", d.metric_id, sizeof(d.metric_id));
+    jsonGetU8  (obj, "si", d.send_interval_polls);
     char dtStr[16]{};
     if (jsonGetString(obj, "dt", dtStr, sizeof(dtStr)))
         d.data_type = strToDt(dtStr);
@@ -605,6 +612,19 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
     // Misc
     (void)jsonGetU8 (json, "avg_count",              tmp.avg_count);
     (void)jsonGetU32(json, "backup_send_interval_sec",tmp.backup_send_interval_sec);
+    // Этап 6: раздельные интервалы retry — читаем из JSON, fallback на legacy
+    { uint32_t v=0;
+      if (jsonGetU32(json,"backup_retry_gsm_sec",v) && v>=10)
+          tmp.backup_retry_gsm_sec = v;
+      else if (tmp.backup_retry_gsm_sec == 60 && tmp.backup_send_interval_sec > 0)
+          tmp.backup_retry_gsm_sec = tmp.backup_send_interval_sec;
+    }
+    { uint32_t v=0;
+      if (jsonGetU32(json,"backup_retry_iridium_sec",v) && v>=60)
+          tmp.backup_retry_iridium_sec = v;
+      else if (tmp.backup_retry_iridium_sec == 600 && tmp.backup_send_interval_sec > 0)
+          tmp.backup_retry_iridium_sec = tmp.backup_send_interval_sec;
+    }
     (void)jsonGetU8 (json, "battery_low_pct",         tmp.battery_low_pct);
     (void)jsonGetString(json, "web_user", tmp.web.web_user, sizeof(tmp.web.web_user));
     (void)jsonGetString(json, "web_pass", tmp.web.web_pass, sizeof(tmp.web.web_pass));

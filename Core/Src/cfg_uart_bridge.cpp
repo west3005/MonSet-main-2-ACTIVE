@@ -220,7 +220,7 @@ void CfgUartBridge_DelayMs(uint32_t ms) {
   uint32_t t0 = HAL_GetTick();
   while ((HAL_GetTick() - t0) < ms) {
     CfgUartBridge_Tick();
-    IWDG->KR = 0xAAAA;
+    IWDG->KR = 0xAAAAU;   /* feed IWDG -- poll_interval can be arbitrarily long */
     HAL_Delay(1);
   }
 }

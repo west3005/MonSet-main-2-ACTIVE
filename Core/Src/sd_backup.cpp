@@ -252,7 +252,22 @@ bool SdBackup::appendLine(const char* jsonLine)
         if (attempt > 0) {
             DBG.warn("SD: open retry %u/%u",
                      (unsigned)attempt, (unsigned)openRetries);
-            HAL_Delay(50);
+            /* FR_LOCKED / FR_DISK_ERR — FatFS внутренний lock не сброшен:
+               делаем полный remount чтобы сбросить таблицу открытых файлов */
+            if (fr == FR_LOCKED || fr == FR_DISK_ERR) {
+                char drv[3]; make_drive(drv, sizeof(drv));
+                f_mount(nullptr, drv, 0);
+                HAL_Delay(50);
+                FRESULT rm = f_mount(&m_fatfs, drv, 1);
+                if (rm != FR_OK) {
+                    DBG.error("SD: remount fail (FR=%d %s)", (int)rm, frStr(rm));
+                    m_mounted = false;
+                    return false;
+                }
+                DBG.info("SD: remount OK after FR=%s", frStr(fr));
+            } else {
+                HAL_Delay(50);
+            }
         }
         fr = f_open(&f, path, FA_OPEN_ALWAYS | FA_WRITE);
         if (fr == FR_OK) break;

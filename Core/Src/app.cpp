@@ -44,6 +44,51 @@ extern "C" {
 #include "dns.h"
 #include "w5500.h"
 #include "wizchip_conf.h"
+// ================================================================
+// Накопители усреднения (Этап 2 — агрегация по send_interval)
+// Аналог value_buffer: HashMap<metric_id, Vec<f64>> из ocean-station.
+// Вместо полного массива отсчётов — только sum + count на канал.
+// RAM: 16 * (4 + 1) = 80 байт. Корректное среднее без heap.
+// ================================================================
+#ifndef MAX_AVG_CHANNELS
+#define MAX_AVG_CHANNELS  MAX_MODBUS_ENTRIES  ///< = 16, по числу каналов
+#endif
+
+static float   s_avgSum[MAX_AVG_CHANNELS]{};   ///< накопленная сумма по каналу
+static uint8_t s_avgCount[MAX_AVG_CHANNELS]{};  ///< число накопленных отсчётов
+
+// Этап 6: раздельные таймеры retry backup — GSM/ETH и Iridium
+// m_lastBackupSendTick (в app.hpp) используется для GSM/ETH
+// s_lastIridiumRetryTick — static, не трогает app.hpp
+static uint32_t s_lastIridiumRetryTick = 0; ///< HAL_GetTick последней попытки Iridium retry
+
+/// Добавить значение val в накопитель канала ch
+static inline void avgPush(uint8_t ch, float val) {
+    if (ch >= MAX_AVG_CHANNELS) return;
+    s_avgSum[ch] += val;
+    s_avgCount[ch]++;
+}
+
+/// Вычислить среднее по накопителю канала ch (возвращает 0.0 если пусто)
+static inline float avgGet(uint8_t ch) {
+    if (ch >= MAX_AVG_CHANNELS || s_avgCount[ch] == 0) return 0.0f;
+    return s_avgSum[ch] / (float)s_avgCount[ch];
+}
+
+/// Сбросить накопитель канала ch
+static inline void avgClear(uint8_t ch) {
+    if (ch >= MAX_AVG_CHANNELS) return;
+    s_avgSum[ch] = 0.0f; s_avgCount[ch] = 0;
+}
+
+/// Сбросить все накопители
+static inline void avgClearAll() {
+    for (uint8_t i = 0; i < MAX_AVG_CHANNELS; i++) {
+        s_avgSum[i] = 0.0f; s_avgCount[i] = 0;
+    }
+}
+
+
 }
 
 #ifdef W5500
@@ -354,10 +399,13 @@ int App::postViaEth(const char* json,uint16_t len) {
         return sendViaMqtt(json,len)?200:-1;
     char url[192]{};
     c.buildServerUrl(url, sizeof(url));
-    // Ocean Monitor: авторизация в теле JSON, заголовок Authorization не нужен
-    const char* auth = (c.protocol==ProtocolMode::OCEAN_MONITOR)
-                       ? nullptr
-                       : (c.server_auth_b64[0] ? c.server_auth_b64 : nullptr);
+    // Ocean Monitor: авторизация через Authorization: Basic header
+    const char* auth = nullptr;
+    if (c.protocol == ProtocolMode::OCEAN_MONITOR) {
+        auth = c.server_auth_b64[0] ? c.server_auth_b64 : nullptr;
+    } else {
+        auth = c.server_auth_b64[0] ? c.server_auth_b64 : nullptr;
+    }
     if(startsWith(url,"https://"))
         return HttpsW5500::postJson(url, auth, json, len, Config::HTTPS_POST_TIMEOUT_MS);
     if(startsWith(url,"http://"))
@@ -376,8 +424,7 @@ int App::postViaGsm(const char* json,uint16_t len) {
         c.buildServerUrl(url, sizeof(url));
         if(startsWith(url,"https://")) {
             A7670CTls tls(m_gsm);
-            // Ocean Monitor: авторизация в теле JSON, CA не нужен
-            if(c.protocol!=ProtocolMode::OCEAN_MONITOR && c.tls_ca_cert[0])
+            if(c.tls_ca_cert[0])
                 tls.setCaCert(c.tls_ca_cert);
             code=(int)tls.httpsPost(url,json,len);
         } else {
@@ -396,29 +443,79 @@ bool App::sendViaMqtt(const char* json,uint16_t len) {
 
 // ----------------------------------------------------------------------------
 // buildOceanPayload — формирует JSON для ocean-monitor.ru /api/rest/measures
-// Формат: {"url":"...","username":"...","password":"...","data":[{"measureTime":"...","metricId":"...","value":"%.3f"}]}
-// value передаётся как СТРОКА (требование протокола)
+//
+// Формат ocean-station (плоский массив, без обёртки url/username/password):
+//   [{"metricId":"...","value":"%.3f","measureTime":"YYYY-MM-DDTHH:MM:SS.mmmZ"},...]
+//
+// - value передаётся как СТРОКА с 3 знаками после точки (требование протокола)
+// - measureTime: ISO 8601 UTC с реальными миллисекундами (вычисляются из Unix timestamp)
+// - все валидные SensorReading включаются в массив (multi-metric)
+// - если ни одного валидного reading нет — используется переданный val как fallback
+// - авторизация передаётся через Authorization: Basic HTTP-заголовок (не в теле)
 // ----------------------------------------------------------------------------
 int App::buildOceanPayload(char* buf, size_t bsz, float val, const DateTime& dt) {
-    /* Ocean-monitor.ru format — single measurement:
-     * [{"url":"...","username":"...","password":"...","data":[{"measureTime":"...","metricId":"...","value":"..."}]}] */
     const RuntimeConfig& c = Cfg();
-    char surl[192]{};
-    c.buildServerUrl(surl, sizeof(surl));
-    return std::snprintf(buf, bsz,
-        "[{\"url\":\"%s\","
-        "\"username\":\"%s\",\"password\":\"%s\","
-        "\"data\":[{"
-        "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.000Z\","
-        "\"metricId\":\"%s\","
-        "\"value\":\"%.3f\""
-        "}]}]",
-        surl,
-        c.proto.ocean_username, c.proto.ocean_password,
-        (unsigned)dt.year, (unsigned)dt.month,  (unsigned)dt.date,
-        (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
-        c.proto.ocean_metric_id,
-        (double)val);
+
+    // Вычисляем реальные миллисекунды из RTC timestamp
+    uint64_t unixMs = toUnixMs(dt);
+    uint16_t ms = (uint16_t)(unixMs % 1000ULL);
+
+    int n = 0;
+    n += std::snprintf(buf + n, bsz - n, "[");
+    if (n < 0 || (size_t)n >= bsz) return -1;
+
+    bool added = false;
+    uint8_t readingCount = m_sensor.getReadingCount();
+
+    for (uint8_t i = 0; i < readingCount; i++) {
+        const SensorReading& r = m_sensor.getReading(i);
+        if (!r.valid) continue;
+
+        // Этап 2: используем среднее из буфера если есть накопленные отсчёты,
+        // иначе — текущее значение (первый poll или буфер пуст)
+        float sendVal = (s_avgCount[i] > 0) ? avgGet(i) : r.value;
+
+        // Выбираем metric_id: из reading.name если не пустой, иначе глобальный
+        const char* mid = (r.name[0] != '\0') ? r.name : c.proto.ocean_metric_id;
+        if (mid[0] == '\0') mid = c.metric_id;
+
+        if (added) {
+            n += std::snprintf(buf + n, bsz - n, ",");
+            if (n < 0 || (size_t)n >= bsz) return -1;
+        }
+        n += std::snprintf(buf + n, bsz - n,
+            "{\"metricId\":\"%s\","
+            "\"value\":\"%.3f\","
+            "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.%03uZ\"}",
+            mid,
+            (double)sendVal,
+            (unsigned)dt.year, (unsigned)dt.month,  (unsigned)dt.date,
+            (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
+            (unsigned)ms);
+        if (n < 0 || (size_t)n >= bsz) return -1;
+        added = true;
+    }
+
+    // Fallback: если ни одного валидного reading нет — используем переданный val
+    if (!added) {
+        float sendVal = (s_avgCount[0] > 0) ? avgGet(0) : val;
+        const char* mid = c.proto.ocean_metric_id[0] ? c.proto.ocean_metric_id : c.metric_id;
+        n += std::snprintf(buf + n, bsz - n,
+            "{\"metricId\":\"%s\","
+            "\"value\":\"%.3f\","
+            "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.%03uZ\"}",
+            mid,
+            (double)sendVal,
+            (unsigned)dt.year, (unsigned)dt.month,  (unsigned)dt.date,
+            (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
+            (unsigned)ms);
+        if (n < 0 || (size_t)n >= bsz) return -1;
+    }
+
+    n += std::snprintf(buf + n, bsz - n, "]");
+    if (n < 0 || (size_t)n >= bsz) return -1;
+
+    return n;
 }
 
 int App::buildPayload(char* buf,size_t bsz,const char* tsStr,float val,const DateTime& dt,bool asArray) {
@@ -434,7 +531,7 @@ int App::buildPayload(char* buf,size_t bsz,const char* tsStr,float val,const Dat
         asArray?"]":"");
 }
 int App::buildMultiSensorPayload(char* buf,size_t bsz,const char* tsStr,const DateTime& dt,bool asArray) {
-    // Ocean Monitor: берём первое валидное показание и делегируем
+    // Ocean Monitor: используем buildOceanPayload (multi-metric, плоский формат)
     if (Cfg().protocol == ProtocolMode::OCEAN_MONITOR) {
         float val = 0.0f;
         for (uint8_t i = 0; i < m_sensor.getReadingCount(); i++) {
@@ -534,6 +631,7 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
     else if(lastSy==0) needSync=true;
     else if((nowSec-lastSy)>=c.ntp_resync_sec) needSync=true;
     else {if(verbose) DBG.info("[%s] NTP: skip",tag); return false;}
+    (void)needSync; ///< suppress -Wunused-but-set-variable
     if(!c.eth_enabled||!ensureEthReady()) return false;
     uint32_t unixSec=0;
     if(!sntpGetUnixTime(c.ntp_host,unixSec)) return false;
@@ -598,6 +696,18 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
         DateTime ts{};
         float val = m_sensor.read(ts);
         m_sensorAlive = (val > -9998.0f);
+
+        // Накапливаем значения в буфер усреднения (Этап 2)
+        // Аналог ocean-station: value_buffer[metric_id].push(val)
+        {
+            uint8_t cnt = m_sensor.getReadingCount();
+            for (uint8_t _i = 0; _i < cnt && _i < MAX_AVG_CHANNELS; _i++) {
+                const SensorReading& _r = m_sensor.getReading(_i);
+                if (_r.valid) avgPush(_i, _r.value);
+            }
+            // Fallback: если нет multi-sensor readings — копим legacy val
+            if (cnt == 0 && m_sensorAlive) avgPush(0, val);
+        }
         const uint64_t unixMs = toUnixMs(ts);
         char tsStr[24]; u64ToDec(tsStr, sizeof(tsStr), unixMs);
         char timeStr[32]{}; ts.formatISO8601(timeStr);
@@ -645,9 +755,19 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
                 } else {
                     SendResult result = m_channelMgr.sendData(m_json, (uint16_t)jsonLen);
                     m_channelAlive = (result == SendResult::Ok);
-                    if      (result == SendResult::Ok)          DBG.info("Data sent OK");
-                    else if (result == SendResult::SavedBackup) DBG.warn("Data saved to backup");
-                    else                                         DBG.error("Data send FAILED");
+                    if (result == SendResult::Ok) {
+                        DBG.info("Data sent OK");
+                        // Этап 2: сброс буферов усреднения после успешной отправки
+                        // Аналог ocean-station: value_buffer.clear()
+                        avgClearAll();
+                    } else if (result == SendResult::SavedBackup) {
+                        DBG.warn("Data saved to backup");
+                        // Сбрасываем буфер и при сохранении в backup — данные уже записаны
+                        avgClearAll();
+                    } else {
+                        DBG.error("Data send FAILED");
+                        // Буфер НЕ сбрасываем при ошибке — накапливаем дальше
+                    }
                 }
             }
         }
@@ -656,14 +776,30 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
         checkWebTimeout();
                 processTestSend();
 
-        // Backup retransmit
-        // FIX: проверяем только isMounted() — m_sdOk может быть false
-        // после неудачного appendLine, но backup уже существует и его надо слать
+        // Backup retransmit — Этап 6: раздельные интервалы GSM/ETH и Iridium
+        // GSM/ETH: backup_retry_gsm_sec (default 60, аналог ocean-station retry_all)
+        // Iridium:  backup_retry_iridium_sec (default 600, аналог ocean-station retry_iridium)
         if (m_sdBackup.exists()) {
             uint32_t now = HAL_GetTick();
-            if ((now - m_lastBackupSendTick) >= (Cfg().backup_send_interval_sec * 1000UL)) {
+            const RuntimeConfig& rc = Cfg();
+            // GSM/ETH retry — используем m_lastBackupSendTick (уже в app.hpp)
+            uint32_t gsmInterval = (rc.backup_retry_gsm_sec > 0)
+                ? rc.backup_retry_gsm_sec * 1000UL
+                : rc.backup_send_interval_sec * 1000UL;
+            if ((now - m_lastBackupSendTick) >= gsmInterval) {
                 m_lastBackupSendTick = now;
-                if (!m_webActive) retransmitBackup();
+                if (!m_webActive && !rc.iridium_enabled) retransmitBackup();
+                else if (!m_webActive && !rc.channels.iridium_enabled) retransmitBackup();
+            }
+            // Iridium retry — отдельный static таймер
+            if (rc.iridium_enabled || rc.channels.iridium_enabled) {
+                uint32_t iridInterval = (rc.backup_retry_iridium_sec > 0)
+                    ? rc.backup_retry_iridium_sec * 1000UL
+                    : 600000UL; // fallback 600 сек
+                if ((now - s_lastIridiumRetryTick) >= iridInterval) {
+                    s_lastIridiumRetryTick = now;
+                    if (!m_webActive) retransmitBackup();
+                }
             }
         }
 

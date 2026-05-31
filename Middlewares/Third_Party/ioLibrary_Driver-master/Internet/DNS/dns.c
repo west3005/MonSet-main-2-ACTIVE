@@ -55,6 +55,11 @@
 #include "socket.h"
 #include "dns.h"
 
+/* STM32 guard: IWDG feed + hard timeout inside DNS_run busy-wait loop */
+#include "stm32f4xx_hal.h"
+#define DNS_IWDG_FEED()    do { IWDG->KR = 0xAAAAU; } while(0)
+#define DNS_LOOP_GUARD_MS  10000UL
+
 #ifdef _DNS_DEBUG_
 #include <stdio.h>
 #endif
@@ -555,7 +560,13 @@ int8_t DNS_run(uint8_t * dns_ip, uint8_t * name, uint8_t * ip_from_dns) {
     sendto(DNS_SOCKET, pDNSMSG, len, dns_ip, IPPORT_DOMAIN);
 #endif
 
+    uint32_t dns_loop_t0 = HAL_GetTick();
     while (1) {
+        DNS_IWDG_FEED();
+        if ((HAL_GetTick() - dns_loop_t0) >= DNS_LOOP_GUARD_MS) {
+            close(DNS_SOCKET);
+            return 0;
+        }
         if ((len = getSn_RX_RSR(DNS_SOCKET)) > 0) {
             if (len > MAX_DNS_BUF_SIZE) {
                 len = MAX_DNS_BUF_SIZE;

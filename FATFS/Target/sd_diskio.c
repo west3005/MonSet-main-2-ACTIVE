@@ -59,13 +59,19 @@ static HAL_StatusTypeDef SD_WaitCardReady(uint32_t timeout_ms)
     uint32_t t0 = HAL_GetTick();
     HAL_SD_CardStateTypeDef st;
     while ((HAL_GetTick() - t0) < timeout_ms) {
+        /* GetCardState (CMD13) использует hsd внутри и может оставить State=BUSY
+         * если карта медленно отвечает. Форсируем READY до и после каждого вызова. */
+        hsd.State = HAL_SD_STATE_READY;
         st = HAL_SD_GetCardState(&hsd);
+        hsd.State = HAL_SD_STATE_READY;
         if (st == HAL_SD_CARD_TRANSFER) {
             return HAL_OK;
         }
-        HAL_Delay(2);
+        HAL_Delay(5);
     }
+    hsd.State = HAL_SD_STATE_READY;
     st = HAL_SD_GetCardState(&hsd);
+    hsd.State = HAL_SD_STATE_READY;
     uart_log_error("[DISKIO] WaitReady timeout: last CardState=%d hsd.State=%d ErrorCode=0x%08lX",
                    (int)st, (int)hsd.State, (unsigned long)hsd.ErrorCode);
     return HAL_TIMEOUT;
@@ -90,19 +96,14 @@ DSTATUS SD_initialize(BYTE lun)
     (void)lun;
     Stat = STA_NOINIT;
 
-    uart_log_info("[DISKIO] SD_initialize: hsd.State=%d CardState=%d",
-                  (int)hsd.State, (int)HAL_SD_GetCardState(&hsd));
 
     /* Если карта уже в TRANSFER — просто фиксируем статус */
     if (HAL_SD_GetCardState(&hsd) == HAL_SD_CARD_TRANSFER) {
-        uart_log_info("[DISKIO] SD_initialize: card already TRANSFER — fast path");
         Stat = SD_CheckStatus(lun);
-        uart_log_info("[DISKIO] SD_initialize: Stat=0x%02X", (unsigned)Stat);
         return Stat;
     }
 
     /* Полная реинициализация — НЕ делаем DeInit чтобы не трогать RCC/GPIO */
-    uart_log_info("[DISKIO] SD_initialize: full reinit path");
     SD_ClearFlags();
 
     /* Переинициализируем HAL без DeInit (GPIO и CLK уже настроены MspInit) */
@@ -112,8 +113,6 @@ DSTATUS SD_initialize(BYTE lun)
         return Stat;
     }
 
-    uart_log_info("[DISKIO] SD_initialize: after MX_Init: hsd.State=%d CardState=%d",
-                  (int)hsd.State, (int)HAL_SD_GetCardState(&hsd));
 
     if (SD_WaitCardReady(2000U) != HAL_OK) {
         uart_log_error("[DISKIO] SD_initialize: WaitCardReady failed");
@@ -125,8 +124,6 @@ DSTATUS SD_initialize(BYTE lun)
     MODIFY_REG(SDIO->CLKCR, SDIO_CLKCR_CLKDIV, 0U);
 
     Stat = SD_CheckStatus(lun);
-    uart_log_info("[DISKIO] SD_initialize: done Stat=0x%02X ClockDiv=%lu",
-                  (unsigned)Stat, (unsigned long)(SDIO->CLKCR & 0xFF));
     return Stat;
 }
 
@@ -143,7 +140,6 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
     if (Stat & STA_NOINIT)               { return RES_NOTRDY; }
     if ((buff == NULL) || (count == 0U)) { return RES_PARERR; }
 
-    uart_log_info("[DISKIO] read: sec=%lu cnt=%u", (unsigned long)sector, (unsigned)count);
 
     SD_ClearFlags();
 
@@ -151,14 +147,7 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
     SDIO->DCTRL = 0U;
     __DSB(); __ISB();
 
-    HAL_SD_CardStateTypeDef cs = HAL_SD_GetCardState(&hsd);
-    uart_log_info("[DISKIO] read pre: CLKCR=0x%08lX CardState=%d RESP1=0x%08lX CardType=%lu RCA=0x%04lX",
-                  (unsigned long)SDIO->CLKCR,
-                  (int)cs,
-                  (unsigned long)SDIO->RESP1,
-                  (unsigned long)hsd.SdCard.CardType,
-                  (unsigned long)hsd.SdCard.RelCardAdd);
-
+    hsd.State = HAL_SD_STATE_READY;  /* форсируем: предыдущая операция могла оставить BUSY */
     hs = HAL_SD_ReadBlocks(&hsd, (uint8_t *)buff,
                            (uint32_t)sector, (uint32_t)count, SD_TIMEOUT);
     if (hs != HAL_OK) {
@@ -177,6 +166,7 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
         SD_ClearFlags();
         return RES_ERROR;
     }
+    hsd.State = HAL_SD_STATE_READY;  /* сброс после read: следующий write не получит HAL_BUSY */
 
     return RES_OK;
 }
@@ -190,9 +180,6 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
     if (Stat & STA_NOINIT)               { return RES_NOTRDY; }
     if ((buff == NULL) || (count == 0U)) { return RES_PARERR; }
 
-    uart_log_info("[DISKIO] write: sec=%lu cnt=%u CardState=%d",
-                  (unsigned long)sector, (unsigned)count,
-                  (int)HAL_SD_GetCardState(&hsd));
 
     SD_ClearFlags();
     /*
@@ -202,15 +189,26 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
      * Решение: всегда писать одиночными CMD24, по одному блоку за раз.
      * Частота 24 МГц (ClockDiv=0), HWFC=0 (errata STM32F4).
      */
+    /* Write clock: ClockDiv=2 → 48MHz/(2+2)=12MHz — надёжнее для большинства карт */
     MODIFY_REG(SDIO->CLKCR,
                SDIO_CLKCR_CLKDIV | SDIO_CLKCR_CLKEN | SDIO_CLKCR_HWFC_EN | SDIO_CLKCR_BYPASS,
-               (0U) | SDIO_CLKCR_CLKEN);  /* ClockDiv=0 → 24 МГц */
-    HAL_Delay(2);
+               (2U) | SDIO_CLKCR_CLKEN);  /* ClockDiv=2 → 12 МГц */
+    HAL_Delay(5);  /* settle после смены частоты */
+
+    /* Ждём готовности карты ПЕРЕД любой записью */
+    if (SD_WaitCardReady(SD_TIMEOUT) != HAL_OK) {
+        uart_log_error("[DISKIO] write: card not ready before write blk=%u", (unsigned)0);
+        SD_ClearFlags();
+        return RES_ERROR;
+    }
+    hsd.State = HAL_SD_STATE_READY;  /* форсируем: HAL handle может быть BUSY после read */
+    HAL_Delay(2);  /* extra settle: карта в TRANSFER но внутренние буферы ещё не готовы */
 
     hs = HAL_OK;
     for (UINT blk = 0U; blk < count; blk++) {
         SDIO->DCTRL = 0U;
         __DSB(); __ISB();
+        hsd.State = HAL_SD_STATE_READY;  /* сброс перед каждым блоком */
         hs = HAL_SD_WriteBlocks(&hsd,
                                 (uint8_t *)buff + blk * 512U,
                                 (uint32_t)sector + blk,
@@ -226,21 +224,16 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
             SD_ClearFlags();
             return RES_ERROR;
         }
-        /* Ждём готовности карты перед следующим блоком */
-        if (blk + 1U < count) {
-            if (SD_WaitCardReady(SD_TIMEOUT) != HAL_OK) {
-                uart_log_error("[DISKIO] write: card not ready after blk=%u", (unsigned)blk);
-                return RES_ERROR;
-            }
+        /* Ждём готовности карты после каждого блока */
+        if (SD_WaitCardReady(SD_TIMEOUT) != HAL_OK) {
+            uart_log_error("[DISKIO] write: card not ready after blk=%u", (unsigned)blk);
+            hsd.State = HAL_SD_STATE_READY;
+            SD_ClearFlags();
+            return RES_ERROR;
         }
-    }
-    if (SD_WaitCardReady(SD_TIMEOUT) != HAL_OK) {
-        uart_log_error("[DISKIO] write: WaitReady timeout");
-        SD_ClearFlags();
-        return RES_ERROR;
+        hsd.State = HAL_SD_STATE_READY;  /* сброс после WaitReady */
     }
 
-    uart_log_info("[DISKIO] write: OK");
     return RES_OK;
 }
 #endif

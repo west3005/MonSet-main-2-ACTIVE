@@ -233,8 +233,16 @@ struct ModbusDeviceCfg {
     uint8_t  reg_count     = 2;     ///< Number of consecutive registers to read
     uint8_t  func_code     = 3;     ///< Modbus function: 3=Read Holding, 4=Read Input
     uint8_t  data_type     = 0;     ///< 0=INT16, 1=UINT16, 2=INT32_BE, 3=UINT32_BE, 4=FLOAT32_BE
-    float    scale         = 1.0f;  ///< Multiplicative scale applied to raw register value
-    float    offset        = 0.0f;  ///< Additive offset applied after scale
+    float    scale         = 1.0f;  ///< Multiplicative scale (= multiplier) applied to raw value
+    float    offset        = 0.0f;  ///< Additive offset (= reference_level) subtracted after scale/divider
+    float    divider       = 1.0f;  ///< Divisor applied after scale: val = (scale * raw) / divider - offset
+                                    ///< Аналог ocean-station ScalingConfig.divider. Default 1.0 — обратная совместимость.
+    // Этап 4: per-device metric_id и send_interval_polls — аналог ocean-station fields[].metric_id
+    // и send_interval_sec. Если metric_id пуст — используется глобальный RuntimeConfig::metric_id.
+    // Если send_interval_polls == 0 — используется глобальный RuntimeConfig::send_interval_polls.
+    char     metric_id[64] = "";    ///< Per-device metric UUID (ocean-station: fields[].metric_id)
+                                    ///< Пусто = использовать глобальный RuntimeConfig::metric_id
+    uint8_t  send_interval_polls = 0; ///< Per-device send cadence override (0 = использовать глобальный)
     uint8_t  channel_idx   = 0;     ///< Destination channel index in the telemetry payload
 };
 
@@ -442,7 +450,12 @@ struct RuntimeConfig
     uint8_t avg_count = 1; ///< Sample average count (legacy; superseded by meas.avg_count)
 
     // --- Backup send interval (legacy) ---
-    uint32_t backup_send_interval_sec = 600; ///< Backup retry period (legacy)
+    uint32_t backup_send_interval_sec = 600;     ///< Backup retry period (legacy, общий fallback)
+    // Этап 6: раздельные таймеры retry — аналог ocean-station
+    // retry_all_backups_in_directory (60 сек) и retry_iridium_backups_in_directory (600 сек)
+    // 0 = использовать backup_send_interval_sec как fallback
+    uint32_t backup_retry_gsm_sec     = 60;      ///< Retry backup via GSM/ETH (ocean-station: 60 сек)
+    uint32_t backup_retry_iridium_sec = 600;     ///< Retry backup via Iridium (ocean-station: 600 сек)
 
     // --- Battery threshold (legacy) ---
     uint8_t battery_low_pct = 20; ///< Battery low % threshold (legacy; superseded by alerts.battery_low_threshold_pct)
