@@ -237,6 +237,12 @@ struct ModbusDeviceCfg {
     float    offset        = 0.0f;  ///< Additive offset (= reference_level) subtracted after scale/divider
     float    divider       = 1.0f;  ///< Divisor applied after scale: val = (scale * raw) / divider - offset
                                     ///< Аналог ocean-station ScalingConfig.divider. Default 1.0 — обратная совместимость.
+    // Этап 4: per-device metric_id и send_interval_polls — аналог ocean-station fields[].metric_id
+    // и send_interval_sec. Если metric_id пуст — используется глобальный RuntimeConfig::metric_id.
+    // Если send_interval_polls == 0 — используется глобальный RuntimeConfig::send_interval_polls.
+    char     metric_id[64] = "";    ///< Per-device metric UUID (ocean-station: fields[].metric_id)
+                                    ///< Пусто = использовать глобальный RuntimeConfig::metric_id
+    uint8_t  send_interval_polls = 0; ///< Per-device send cadence override (0 = использовать глобальный)
     uint8_t  channel_idx   = 0;     ///< Destination channel index in the telemetry payload
 };
 
