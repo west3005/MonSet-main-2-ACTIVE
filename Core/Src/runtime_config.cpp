@@ -385,11 +385,14 @@ static void parseRtuDeviceCfg(const char* obj, ModbusDeviceCfg& d) {
     jsonGetF32 (obj, "sc", d.scale);
     jsonGetF32 (obj, "of", d.offset);
     // Этап 3: divider — аналог ocean-station ScalingConfig.divider
-    // Если поле отсутствует в JSON — остаётся default 1.0 (обратная совместимость)
     jsonGetF32 (obj, "dv", d.divider);
     if (d.divider == 0.0f) d.divider = 1.0f; // защита от деления на ноль
     jsonGetString(obj, "un", d.unit, sizeof(d.unit));
     jsonGetU8  (obj, "ci", d.channel_idx);
+    // Этап 4: per-device metric_id и send_interval_polls
+    // аналог ocean-station fields[].metric_id и send_interval_sec
+    jsonGetString(obj, "mi", d.metric_id, sizeof(d.metric_id));
+    jsonGetU8  (obj, "si", d.send_interval_polls);
     char dtStr[16]{};
     if (jsonGetString(obj, "dt", dtStr, sizeof(dtStr)))
         d.data_type = strToDt(dtStr);
