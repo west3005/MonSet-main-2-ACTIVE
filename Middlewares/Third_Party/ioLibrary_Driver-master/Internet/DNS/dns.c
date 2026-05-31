@@ -54,7 +54,7 @@
 
 #include "socket.h"
 #include "dns.h"
-#include "debug_uart.hpp"
+#include "debug_uart_c.h"
 
 /* STM32 guard: IWDG feed + hard timeout inside DNS_run busy-wait loop */
 #include "stm32f4xx_hal.h"
