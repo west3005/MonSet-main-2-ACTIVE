@@ -4216,6 +4216,7 @@ void WebServer::handleApiConfig(uint8_t sn){
         // measurement
         "\"poll_interval_s\":%lu,\"send_interval_s\":%lu,"
         "\"backup_retry_s\":%u,\"avg_count\":%u,"
+        "\"backup_retry_gsm_sec\":%lu,\"backup_retry_iridium_sec\":%lu,"
         "\"deep_sleep_enabled\":%s,\"deep_sleep_s\":%u,"
         "\"schedule_enabled\":%s,\"schedule_start\":\"%s\",\"schedule_stop\":\"%s\","
         // ethernet
@@ -4256,6 +4257,7 @@ void WebServer::handleApiConfig(uint8_t sn){
         wh_url, wh_meth,
         (unsigned long)poll_s,(unsigned long)send_s,
         (unsigned)bkup_s,(unsigned)avg,
+        (unsigned long)c.backup_retry_gsm_sec,(unsigned long)c.backup_retry_iridium_sec,
         c.meas.deep_sleep_enabled?"true":"false",(unsigned)c.meas.deep_sleep_s,
         c.meas.schedule_enabled?"true":"false",c.meas.schedule_start,c.meas.schedule_stop,
         eth_dhcp?"true":"false",
@@ -4311,13 +4313,16 @@ void WebServer::handleApiConfig(uint8_t sn){
             n += std::snprintf(m_respBuf+n, RESP_BUF_SIZE-n,
                 "%s{\"en\":%s,\"sa\":%u,\"nm\":\"%s\",\"fc\":%u,"
                 "\"rs\":%u,\"rc\":%u,\"dt\":\"%s\","
-                "\"sc\":%f,\"of\":%f,\"un\":\"%s\",\"ci\":%u}",
+                "\"sc\":%f,\"of\":%f,\"dv\":%f,"
+                "\"un\":\"%s\",\"ci\":%u,"
+                "\"mi\":\"%s\",\"si\":%u}",
                 j==0?"":",",
                 d.enabled?"true":"false",
                 (unsigned)d.slave_addr, d.name, (unsigned)d.func_code,
                 (unsigned)d.reg_start, (unsigned)d.reg_count, dtStr,
-                (double)d.scale, (double)d.offset,
-                d.unit, (unsigned)d.channel_idx
+                (double)d.scale, (double)d.offset, (double)d.divider,
+                d.unit, (unsigned)d.channel_idx,
+                d.metric_id, (unsigned)d.send_interval_polls
             );
         }
         n += std::snprintf(m_respBuf+n, RESP_BUF_SIZE-n, "]}");
