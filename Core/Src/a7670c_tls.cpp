@@ -251,16 +251,17 @@ int A7670CTls::connect(const char* host, uint16_t port)
 
     char r[256], cmd[128];
 
-    // Закрыть предыдущий сокет
+    // Закрыть предыдущий сокет (может не существовать — OK и ERROR оба допустимы)
     std::snprintf(cmd, sizeof(cmd), "AT+CSOCL=%hhu\r\n", m_sockId);
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-    HAL_Delay(100);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000); // drain: поглощаем OK или ERROR
+    HAL_Delay(300); // дать модему время завершить закрытие
 
     // Создать TCP-сокет
     m_modem.sendRaw_pub("AT+CSOC=1,1,1\r\n", 16);
-    m_modem.waitFor_pub(r, sizeof(r), "+CSOC:", 3000);
-    if (!std::strstr(r, "+CSOC:") && !std::strstr(r, "OK")) {
-        DBG.error("TLS: CSOC create failed");
+    m_modem.waitFor_pub(r, sizeof(r), "+CSOC:", 5000);
+    if (!std::strstr(r, "+CSOC:")) {
+        DBG.error("TLS: CSOC create failed [%.80s]", r);
         return -1;
     }
     const char* sp = std::strstr(r, "+CSOC:");
