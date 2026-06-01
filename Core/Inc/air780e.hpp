@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstddef>
 #include "gsm_common.hpp"
+#include "uart_ringbuf.hpp"
 
 // ================================================================
 // Air780E
@@ -64,6 +65,8 @@ public:
     uint16_t waitFor_pub(char* buf, uint16_t bsize,
                          const char* expected, uint32_t timeout)
     { return waitFor(buf, bsize, expected, timeout); }
+    /** Сбросить RX-буфер — вызывать перед новой AT-командой через sendRaw_pub */
+    void     flushRx_pub() { g_air780_rxbuf.clear(); }
 
 protected:
     UART_HandleTypeDef* m_uart;
