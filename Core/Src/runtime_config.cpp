@@ -16,6 +16,24 @@
 #include <cctype>
 extern "C" {
 #include "ff.h"
+
+// ── base64Encode ─────────────────────────────────────────────────────────────
+static void base64Encode(const char* in, char* out, size_t outSz) {
+    static const char t[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t i = 0, o = 0, len = std::strlen(in);
+    while (i < len && o + 5 < outSz) {
+        uint32_t b = ((uint8_t)in[i]) << 16;
+        if (i + 1 < len) b |= ((uint8_t)in[i + 1]) << 8;
+        if (i + 2 < len) b |=  (uint8_t)in[i + 2];
+        out[o++] = t[(b >> 18) & 0x3F];
+        out[o++] = t[(b >> 12) & 0x3F];
+        out[o++] = (i + 1 < len) ? t[(b >>  6) & 0x3F] : '=';
+        out[o++] = (i + 2 < len) ? t[ b        & 0x3F] : '=';
+        i += 3;
+    }
+    out[o] = 0;
+}
 }
 
 static RuntimeConfig g_cfg;
@@ -715,6 +733,13 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
       if (jsonGetString(json,"ocean_username", s,sizeof(s))) copyStr(tmp.proto.ocean_username,  sizeof(tmp.proto.ocean_username),  s); }
     { char s[64]{};
       if (jsonGetString(json,"ocean_password", s,sizeof(s))) copyStr(tmp.proto.ocean_password,  sizeof(tmp.proto.ocean_password),  s); }
+    /* Авто-формируем server_auth_b64 из ocean_username:password */
+    if (tmp.proto.ocean_username[0] && tmp.proto.ocean_password[0]) {
+        char creds[160]{};
+        std::snprintf(creds, sizeof(creds), "%s:%s",
+            tmp.proto.ocean_username, tmp.proto.ocean_password);
+        base64Encode(creds, tmp.server_auth_b64, sizeof(tmp.server_auth_b64));
+    }
     { char s[64]{};
       if (jsonGetString(json,"ocean_metric_id",s,sizeof(s))) copyStr(tmp.proto.ocean_metric_id, sizeof(tmp.proto.ocean_metric_id), s); }
 
