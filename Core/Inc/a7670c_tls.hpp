@@ -32,7 +32,7 @@ public:
     int  connect(const char* host, uint16_t port);
 
     // HTTPS POST (вызывать после connect)
-    uint16_t httpsPost(const char* url, const char* json, uint16_t len);
+    int      httpsPost(const char* url, const char* json, uint16_t len);
 
     // Закрыть соединение
     void close();
