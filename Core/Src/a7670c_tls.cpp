@@ -252,12 +252,14 @@ int A7670CTls::connect(const char* host, uint16_t port)
     char r[256], cmd[128];
 
     // Закрыть предыдущий сокет (может не существовать — OK и ERROR оба допустимы)
+    m_modem.flushRx_pub();  // сброс буфера перед командой
     std::snprintf(cmd, sizeof(cmd), "AT+CSOCL=%hhu\r\n", m_sockId);
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000); // drain: поглощаем OK или ERROR
-    HAL_Delay(300); // дать модему время завершить закрытие
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000); // drain: OK или ERROR
+    HAL_Delay(200);
 
     // Создать TCP-сокет
+    m_modem.flushRx_pub();  // сброс остатков ответа CSOCL
     m_modem.sendRaw_pub("AT+CSOC=1,1,1\r\n", 16);
     m_modem.waitFor_pub(r, sizeof(r), "+CSOC:", 5000);
     if (!std::strstr(r, "+CSOC:")) {
