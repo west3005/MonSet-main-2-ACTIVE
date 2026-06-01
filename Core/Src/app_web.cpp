@@ -125,8 +125,14 @@ void App::runTestSend() {
     }
 
     m_testState = TestSendState::Sending;
-    std::strncpy(m_testChannel, "eth", sizeof(m_testChannel) - 1);
-    m_testChannel[sizeof(m_testChannel) - 1] = '\0';
+    /* Определяем приоритетный канал по активной конфигурации */
+    { const RuntimeConfig& _c = Cfg();
+      if      (_c.eth_enabled)     std::strncpy(m_testChannel, "eth",     sizeof(m_testChannel)-1);
+      else if (_c.gsm_enabled)     std::strncpy(m_testChannel, "gsm",     sizeof(m_testChannel)-1);
+      else if (_c.wifi_enabled)    std::strncpy(m_testChannel, "wifi",    sizeof(m_testChannel)-1);
+      else if (_c.iridium_enabled) std::strncpy(m_testChannel, "iridium", sizeof(m_testChannel)-1);
+      else                         std::strncpy(m_testChannel, "none",    sizeof(m_testChannel)-1);
+      m_testChannel[sizeof(m_testChannel)-1] = '\0'; }
 
     bool prevWebExclusive = g_web_exclusive;
     g_web_exclusive = false;
