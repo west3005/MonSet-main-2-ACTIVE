@@ -228,4 +228,5 @@ private:
     // ---- Init helpers ----
     void initModbusPorts();
     void initChannelManager();
+    void reinitChannelManager();  ///< пересоздать каналы после изменения Cfg()
 };
