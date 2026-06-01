@@ -172,6 +172,44 @@ GsmStatus A7670C::activatePdnA7670()
         }
     }
 
+    // Включить буферизацию приёма (обязательно перед AT+CIPOPEN)
+    sendCommand("+CIPRXGET=1", r, sizeof(r), Config::SIM7020_CMD_TIMEOUT_MS);
+
+    // Ждём IP-адрес (CGACT OK не гарантирует мгновенного IP)
+    {
+        char ip[64] = {};
+        const uint32_t t0 = HAL_GetTick();
+        while ((HAL_GetTick() - t0) < 6000) {
+            sendCommand("+CGPADDR=1", r, sizeof(r), Config::SIM7020_CMD_TIMEOUT_MS);
+            // Ответ: +CGPADDR: 1,"x.x.x.x"
+            const char* q = std::strstr(r, "+CGPADDR:");
+            if (q) {
+                // Извлекаем IP из кавычек
+                const char* qs = std::strchr(q, '"');
+                if (qs) {
+                    qs++;
+                    const char* qe = std::strchr(qs, '"');
+                    if (qe && qe > qs) {
+                        size_t ipLen = (size_t)(qe - qs);
+                        if (ipLen >= sizeof(ip)) ipLen = sizeof(ip) - 1;
+                        std::memcpy(ip, qs, ipLen);
+                        ip[ipLen] = '\0';
+                    }
+                }
+            }
+            // Если IP не 0.0.0.0 и не пустой — готово
+            if (ip[0] && std::strcmp(ip, "0.0.0.0") != 0) {
+                DBG.info("A7670C: IP=%s", ip);
+                break;
+            }
+            HAL_Delay(500);
+            IWDG->KR = 0xAAAA;
+        }
+        if (!ip[0] || std::strcmp(ip, "0.0.0.0") == 0) {
+            DBG.warn("A7670C: IP не получен за 6с, продолжаем...");
+        }
+    }
+
     return GsmStatus::Ok;
 }
 
