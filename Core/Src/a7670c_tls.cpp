@@ -36,7 +36,7 @@ extern "C" {
 // ============================================================================
 static constexpr uint16_t MODEM_MAX_SEND = 512;
 static constexpr uint16_t MODEM_MAX_RECV = 512;
-static constexpr uint8_t  CIP_LINK       = 1;    ///< link 0 зарезервирован под HTTP (httpPost)
+static constexpr uint8_t  CIP_LINK       = 0;    ///< A7670C: первый доступный link
 
 // ============================================================================
 // Конструктор / Деструктор
@@ -254,6 +254,7 @@ int A7670CTls::connect(const char* host, uint16_t port)
     std::snprintf(cmd, sizeof(cmd),
                   "AT+CIPOPEN=%hhu,\"TCP\",\"%s\",%u\r\n",
                   m_sockId, host, port);
+    DBG.info("TLS: >> %s", cmd);
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
     DBG.info("TLS: waiting +CIPOPEN...");
 
