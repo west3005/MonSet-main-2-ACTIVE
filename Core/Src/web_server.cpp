@@ -4626,6 +4626,9 @@ void WebServer::handlePostConfig(uint8_t sn,const char* body){
 
         Cfg() = tmp;
 
+        /* Пересоздать каналы по новой конфигурации — без перезагрузки */
+        if (m_app) m_app->reinitChannelManager();
+
         /* Статические JSON-ответы — без snprintf/буфера, нет риска переполнения */
         static const char RESP_SD[]  = "{\"status\":\"ok\",\"saved_to_sd\":true}";
         static const char RESP_RAM[] = "{\"status\":\"ok_ram\",\"saved_to_sd\":false}";
