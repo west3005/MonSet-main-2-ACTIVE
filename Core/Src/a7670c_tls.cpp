@@ -249,12 +249,6 @@ int A7670CTls::connect(const char* host, uint16_t port)
     m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
     HAL_Delay(200);
 
-    // Включить режим буферизованного чтения (обязателен перед CIPOPEN)
-    m_modem.flushRx_pub();
-    m_modem.sendRaw_pub("AT+CIPRXGET=1\r\n", 16);
-    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
-    DBG.info("TLS: CIPRXGET=1 [%s]", std::strstr(r, "OK") ? "OK" : "?");
-
     // AT+CIPOPEN=<id>,"TCP","<host>",<port>
     m_modem.flushRx_pub();
     std::snprintf(cmd, sizeof(cmd),
