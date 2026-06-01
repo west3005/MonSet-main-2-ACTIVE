@@ -166,6 +166,12 @@ public:
      */
     uint8_t getChannelStatus() const { return m_channelStatus; }
 
+    /**
+     * @brief Reinitialise channel manager after config change via web.
+     *        Called by WebServer::handlePostConfig after Cfg() = tmp.
+     */
+    void reinitChannelManager();
+
 private:
     /**
      * @brief Check web idle timeout and clear m_webActive if expired.
@@ -228,5 +234,4 @@ private:
     // ---- Init helpers ----
     void initModbusPorts();
     void initChannelManager();
-    void reinitChannelManager();  ///< пересоздать каналы после изменения Cfg()
 };
