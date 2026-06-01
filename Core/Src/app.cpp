@@ -618,6 +618,18 @@ void App::initChannelManager() {
     if(Cfg().eth_enabled&&eth.ready()) m_channelMgr.markAlive(Channel::ETHERNET);
 }
 
+void App::reinitChannelManager() {
+    m_channelMgr.init(&m_sdBackup);  // сброс + повторная регистрация
+    if(Cfg().eth_enabled)     m_channelMgr.registerChannel(Channel::ETHERNET,sendViaEth,    this);
+    if(Cfg().gsm_enabled)     m_channelMgr.registerChannel(Channel::GSM,     sendViaGsm,    this);
+    if(Cfg().wifi_enabled)    m_channelMgr.registerChannel(Channel::WIFI,    sendViaWifi,   this);
+    if(Cfg().iridium_enabled) m_channelMgr.registerChannel(Channel::IRIDIUM, sendViaIridium,this);
+    if(Cfg().eth_enabled&&eth.ready()) m_channelMgr.markAlive(Channel::ETHERNET);
+    DBG.info("[CFG] ChMgr reinit: eth=%d gsm=%d wifi=%d irid=%d",
+        (int)Cfg().eth_enabled,(int)Cfg().gsm_enabled,
+        (int)Cfg().wifi_enabled,(int)Cfg().iridium_enabled);
+}
+
 bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
     const RuntimeConfig& c=Cfg();
     if(!c.ntp_enabled) return false;
