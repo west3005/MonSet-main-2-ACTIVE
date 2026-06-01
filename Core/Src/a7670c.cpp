@@ -171,6 +171,16 @@ GsmStatus A7670C::activatePdnA7670()
             return GsmStatus::PdnErr;
         }
     }
+
+    /* AT+NETOPEN — активирует TCP/IP стек A7670C, обязателен перед AT+CSOC.
+     * Если уже открыт — возвращает "+NETOPEN: 1" или "OK", оба допустимы. */
+    sendCommand("+NETOPEN", r, sizeof(r), 5000);
+    if (std::strstr(r, "ERROR") && !std::strstr(r, "+NETOPEN: 1")) {
+        DBG.warn("A7670C: NETOPEN warn [%s]", r);
+    } else {
+        DBG.info("A7670C: NETOPEN OK");
+    }
+    HAL_Delay(500); // дать стеку инициализироваться
     return GsmStatus::Ok;
 }
 
