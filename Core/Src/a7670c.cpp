@@ -176,32 +176,35 @@ GsmStatus A7670C::activatePdnA7670()
     sendCommand("+CIPRXGET=1", r, sizeof(r), Config::SIM7020_CMD_TIMEOUT_MS);
 
     // Ждём IP-адрес (CGACT OK не гарантирует мгновенного IP)
+    // Ответ A7670C: +CGPADDR: 1,10.x.x.x  (без кавычек)
     {
         char ip[64] = {};
         const uint32_t t0 = HAL_GetTick();
         while ((HAL_GetTick() - t0) < 6000) {
             sendCommand("+CGPADDR=1", r, sizeof(r), Config::SIM7020_CMD_TIMEOUT_MS);
-            // Ответ: +CGPADDR: 1,"x.x.x.x"
             const char* q = std::strstr(r, "+CGPADDR:");
             if (q) {
-                // Извлекаем IP из кавычек
-                const char* qs = std::strchr(q, '"');
-                if (qs) {
-                    qs++;
-                    const char* qe = std::strchr(qs, '"');
-                    if (qe && qe > qs) {
-                        size_t ipLen = (size_t)(qe - qs);
-                        if (ipLen >= sizeof(ip)) ipLen = sizeof(ip) - 1;
-                        std::memcpy(ip, qs, ipLen);
-                        ip[ipLen] = '\0';
+                // Пропускаем до запятой после cid: "+CGPADDR: 1,10.x.x.x"
+                const char* comma = std::strchr(q, ',');
+                if (comma) {
+                    comma++;
+                    // Пропускаем пробелы и кавычки (на случай прошивок с кавычками)
+                    while (*comma == ' ' || *comma == '"') comma++;
+                    size_t ipLen = 0;
+                    while (comma[ipLen] && comma[ipLen] != '\r' &&
+                           comma[ipLen] != '\n' && comma[ipLen] != '"' &&
+                           ipLen < sizeof(ip) - 1) {
+                        ip[ipLen] = comma[ipLen];
+                        ipLen++;
                     }
+                    ip[ipLen] = '\0';
                 }
             }
-            // Если IP не 0.0.0.0 и не пустой — готово
             if (ip[0] && std::strcmp(ip, "0.0.0.0") != 0) {
                 DBG.info("A7670C: IP=%s", ip);
                 break;
             }
+            ip[0] = '\0';
             HAL_Delay(500);
             IWDG->KR = 0xAAAA;
         }
@@ -209,6 +212,16 @@ GsmStatus A7670C::activatePdnA7670()
             DBG.warn("A7670C: IP не получен за 6с, продолжаем...");
         }
     }
+
+    // AT+NETOPEN — активирует TCP/IP стек, обязателен для AT+CIPOPEN
+    // "+NETOPEN: 1" означает "уже открыт" — не ошибка
+    sendCommand("+NETOPEN", r, sizeof(r), 5000);
+    if (std::strstr(r, "ERROR") && !std::strstr(r, "+NETOPEN: 1")) {
+        DBG.warn("A7670C: NETOPEN warn [%.40s]", r);
+    } else {
+        DBG.info("A7670C: NETOPEN OK");
+    }
+    HAL_Delay(300);
 
     return GsmStatus::Ok;
 }
