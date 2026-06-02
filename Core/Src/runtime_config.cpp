@@ -1171,6 +1171,8 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
             "\"poll_interval_s\":%u,"
             "\"send_interval_s\":%u,"
             "\"backup_retry_s\":%u,"
+            "\"backup_retry_gsm_sec\":%lu," 
+            "\"backup_retry_iridium_sec\":%lu,"
             "\"deep_sleep_enabled\":%s,"
             "\"deep_sleep_s\":%u,"
             "\"schedule_enabled\":%s,"
@@ -1214,6 +1216,8 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
             proto.server_host, proto.server_token, (unsigned)proto.server_port,
             (unsigned)meas.poll_interval_s, (unsigned)meas.send_interval_s,
             (unsigned)meas.backup_retry_s,
+            (unsigned long)backup_retry_gsm_sec,
+            (unsigned long)backup_retry_iridium_sec,
             meas.deep_sleep_enabled?"true":"false", (unsigned)meas.deep_sleep_s,
             meas.schedule_enabled?"true":"false",
             meas.schedule_start, meas.schedule_stop,
