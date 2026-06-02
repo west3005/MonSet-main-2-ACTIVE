@@ -71,6 +71,7 @@ void RuntimeConfig::setDefaultsFromConfig() {
     copyStr(gsm_apn,  sizeof(gsm_apn),  Config::GSM_APN);
     copyStr(gsm_user, sizeof(gsm_user), Config::GSM_APN_USER);
     copyStr(gsm_pass, sizeof(gsm_pass), Config::GSM_APN_PASS);
+    gsm_server_ip[0] = '\0';
 
     poll_interval_sec   = Config::POLL_INTERVAL_SEC;
     send_interval_polls = Config::SEND_INTERVAL_POLLS;
@@ -551,9 +552,10 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
     (void)jsonGetIpv4(json, "eth_gw",    tmp.eth_gw);
     (void)jsonGetIpv4(json, "eth_dns",   tmp.eth_dns);
 
-    (void)jsonGetString(json, "gsm_apn",  tmp.gsm_apn,  sizeof(tmp.gsm_apn));
-    (void)jsonGetString(json, "gsm_user", tmp.gsm_user, sizeof(tmp.gsm_user));
-    (void)jsonGetString(json, "gsm_pass", tmp.gsm_pass, sizeof(tmp.gsm_pass));
+    (void)jsonGetString(json, "gsm_apn",       tmp.gsm_apn,       sizeof(tmp.gsm_apn));
+    (void)jsonGetString(json, "gsm_user",      tmp.gsm_user,      sizeof(tmp.gsm_user));
+    (void)jsonGetString(json, "gsm_pass",      tmp.gsm_pass,      sizeof(tmp.gsm_pass));
+    (void)jsonGetString(json, "gsm_server_ip", tmp.gsm_server_ip, sizeof(tmp.gsm_server_ip));
 
     (void)jsonGetU32(json, "poll_interval_sec",   tmp.poll_interval_sec);
     (void)jsonGetU32(json, "send_interval_polls",  tmp.send_interval_polls);
@@ -991,6 +993,7 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
         "\"gsm_apn\":\"%s\","
         "\"gsm_user\":\"%s\","
         "\"gsm_pass\":\"%s\","
+        "\"gsm_server_ip\":\"%s\","
         "\"poll_interval_sec\":%lu,"
         "\"send_interval_polls\":%lu,"
         "\"modbus_slave\":%u,"
@@ -1006,7 +1009,7 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
         complex_enabled?"true":"false",
         metric_id, complex_id, server_url, server_auth_b64,
         ethModeStr, macStr, ip, sn, gw, dns,
-        gsm_apn, gsm_user, gsm_pass,
+        gsm_apn, gsm_user, gsm_pass, gsm_server_ip,
         (unsigned long)poll_interval_sec,
         (unsigned long)send_interval_polls,
         (unsigned)modbus_slave, (unsigned)modbus_func,
