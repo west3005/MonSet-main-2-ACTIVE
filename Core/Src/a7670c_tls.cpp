@@ -297,23 +297,40 @@ int A7670CTls::connect(const char* host, uint16_t port)
     DBG.info("TLS: CIPOPEN to %s:%u", connectAddr, (unsigned)port);
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
 
-    // Шаг 1: ждём "OK" (подтверждение приёма команды), таймаут 3с
-    m_modem.waitFor_pub(r, sizeof(r), "OK", 3000);
-
-    // Шаг 2: ждём асинхронный "+CIPOPEN: <id>,<err>", таймаут 15с
-    m_modem.waitFor_pub(r, sizeof(r), "+CIPOPEN:", 15000);
-    if (!std::strstr(r, "+CIPOPEN:")) {
-        DBG.error("TLS: CIPOPEN no response [%.80s]", r);
-        return -1;
-    }
+    // Ждём +CIPOPEN: — ответ асинхронный, между OK и +CIPOPEN: может быть пауза >50мс.
+    // waitFor прерывается по 50мс тишины и не захватывает +CIPOPEN: если он пришёл позже.
+    // Решение: накапливающий буфер + повторные дочитывания до таймаута 18с.
     {
+        char cipBuf[256] = {};
+        uint16_t cipLen = 0;
+        uint32_t cipStart = HAL_GetTick();
+        constexpr uint32_t CIP_TIMEOUT_MS = 18000;
+
+        while ((HAL_GetTick() - cipStart) < CIP_TIMEOUT_MS) {
+            // Дочитываем в остаток буфера
+            char* tail   = cipBuf + cipLen;
+            uint16_t rem = static_cast<uint16_t>(sizeof(cipBuf) - 1 - cipLen);
+            if (rem == 0) break;
+            uint16_t got = m_modem.waitFor_pub(tail, rem + 1, "+CIPOPEN:", 500);
+            cipLen = static_cast<uint16_t>(std::strlen(cipBuf));
+            IWDG->KR = 0xAAAA;
+            if (std::strstr(cipBuf, "+CIPOPEN:")) break;
+            if (std::strstr(cipBuf, "+CME ERROR")) break;
+            (void)got;
+        }
+
+        if (!std::strstr(cipBuf, "+CIPOPEN:")) {
+            DBG.error("TLS: CIPOPEN no response [%.80s]", cipBuf);
+            return -1;
+        }
         int id = 0, err = -1;
-        const char* p = std::strstr(r, "+CIPOPEN:");
+        const char* p = std::strstr(cipBuf, "+CIPOPEN:");
         std::sscanf(p, "+CIPOPEN: %d,%d", &id, &err);
         if (err != 0) {
             DBG.error("TLS: CIPOPEN err=%d addr=%s:%u", err, connectAddr, (unsigned)port);
             return -2;
         }
+        std::memcpy(r, cipBuf, sizeof(r));
     }
     DBG.info("TLS: TCP open OK (link=%u)", (unsigned)m_sockId);
 
