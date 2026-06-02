@@ -4213,6 +4213,7 @@ void WebServer::handleApiConfig(uint8_t sn){
         "\"mqtt_host\":\"%s\",\"mqtt_port\":%u,\"mqtt_user\":\"%s\",\"mqtt_pass\":\"%s\","
         "\"mqtt_topic\":\"%s\",\"mqtt_qos\":%u,\"mqtt_tls\":%s,"
         "\"webhook_url\":\"%s\",\"webhook_method\":\"%s\","
+        "\"server_host\":\"%s\",\"server_path\":\"%s\",\"server_port\":%u,\"server_token\":\"%s\"," 
         // measurement
         "\"poll_interval_s\":%lu,\"send_interval_s\":%lu,"
         "\"backup_retry_s\":%u,\"avg_count\":%u,"
@@ -4256,6 +4257,8 @@ void WebServer::handleApiConfig(uint8_t sn){
         mq_host, (unsigned)mq_port, mq_user, mq_pass,
         mq_top, (unsigned)c.proto.mqtt_qos, (c.proto.mqtt_tls||c.mqtt_tls)?"true":"false",
         wh_url, wh_meth,
+        c.proto.server_host, c.proto.server_path,
+        (unsigned)c.proto.server_port, c.proto.server_token,
         (unsigned long)poll_s,(unsigned long)send_s,
         (unsigned)bkup_s,(unsigned)avg,
         (unsigned long)c.backup_retry_gsm_sec,(unsigned long)c.backup_retry_iridium_sec,
