@@ -422,13 +422,26 @@ int App::postViaGsm(const char* json,uint16_t len) {
     } else {
         char url[192]{};
         c.buildServerUrl(url, sizeof(url));
-        if(startsWith(url,"https://")) {
+        // Если gsm_server_ip задан — заменяем hostname на IP
+        // (DNS недоступен у некоторых операторов через AT+CDNSGIP)
+        char gsmUrl[192]{};
+        std::strncpy(gsmUrl, url, sizeof(gsmUrl)-1);
+        if (c.gsm_server_ip[0]) {
+            const char* schemeEnd = std::strstr(url, "://");
+            if (schemeEnd) {
+                const char* pathStart = std::strchr(schemeEnd + 3, '/');
+                if (pathStart)
+                    std::snprintf(gsmUrl, sizeof(gsmUrl),
+                                 "https://%s%s", c.gsm_server_ip, pathStart);
+            }
+        }
+        if(startsWith(gsmUrl,"https://")) {
             A7670CTls tls(m_gsm);
             if(c.tls_ca_cert[0])
                 tls.setCaCert(c.tls_ca_cert);
-            code=(int)tls.httpsPost(url,json,len);
+            code=(int)tls.httpsPost(gsmUrl,json,len);
         } else {
-            code=(int)m_gsm.httpPost(url,json,len);
+            code=(int)m_gsm.httpPost(gsmUrl,json,len);
         }
     }
     m_gsm.disconnect(); m_gsm.powerOff(); return code;
