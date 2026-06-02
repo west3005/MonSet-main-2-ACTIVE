@@ -72,10 +72,14 @@ public:
 private:
     // ---- Hardware modules ----
     DS3231         m_rtc;
-    ModbusRTU      m_modbusPort0;  ///< USART3
-    ModbusRTU*     m_modbusPorts[3]; ///< Array of port pointers
+    ModbusRTU      m_modbusPort0;  ///< USART3 — датчик порт 0 (всегда активен)
+    ModbusRTU      m_modbusPort1;  ///< UART4  — датчик порт 1 (включается через rtu_ports[1].enabled)
+    ModbusRTU      m_modbusPort2;  ///< UART5  — датчик порт 2 (включается через rtu_ports[2].enabled)
+    ModbusRTU*     m_modbusPorts[3]; ///< Индексированный массив: [0]=port0, [1]=port1, [2]=port2
     A7670C         m_gsm;
-    SdBackup       m_sdBackup;
+    SdBackup       m_sdBackup;   ///< Бэкап порта 0 (USART3) — backup_p0.jsn
+    SdBackup       m_sdBackup1;  ///< Бэкап порта 1 (UART4)  — backup_p1.jsn
+    SdBackup       m_sdBackup2;  ///< Бэкап порта 2 (UART5)  — backup_p2.jsn
     SensorReader   m_sensor;
     DataBuffer     m_buffer;
     PowerManager   m_power;
