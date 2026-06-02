@@ -259,15 +259,16 @@ int A7670CTls::connect(const char* host, uint16_t port)
     std::snprintf(cmd, sizeof(cmd), "AT+CDNSGIP=\"%s\"\r\n", host);
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
     DBG.info("TLS: DNS resolving %s...", host);
-    // Ответ: +CDNSGIP: 1,"host","x.x.x.x"
-    uint16_t dnsRxLen = m_modem.waitFor_pub(r, sizeof(r), "+CDNSGIP:", 8000);
+    // Формат A7670C: +CDNSGIP: 1,<count>,"host","ip1","ip2",...
+    // Успех = "+CDNSGIP: 1", ошибка = "+CDNSGIP: 0,<errcode>"
+    uint16_t dnsRxLen = m_modem.waitFor_pub(r, sizeof(r), "+CDNSGIP:", 10000);
     (void)dnsRxLen;
     if (std::strstr(r, "+CDNSGIP: 1")) {
-        // Парсим IP — третье поле в кавычках
+        // Пропускаем три запятые: "1,<count>,"host","ip"
         const char* p1 = std::strstr(r, "+CDNSGIP: 1");
-        // Пропускаем до второй запятой
-        const char* c1 = std::strchr(p1, ',');
-        if (c1) c1 = std::strchr(c1 + 1, ',');
+        const char* c1 = std::strchr(p1, ',');           // после "1"
+        if (c1) c1 = std::strchr(c1 + 1, ',');          // после count
+        if (c1) c1 = std::strchr(c1 + 1, ',');          // после "host"
         if (c1) {
             c1++;
             while (*c1 == ' ' || *c1 == '"') c1++;
@@ -278,13 +279,17 @@ int A7670CTls::connect(const char* host, uint16_t port)
                 ipLen++;
             }
             connectAddr[ipLen] = '\0';
-            DBG.info("TLS: DNS OK %s -> %s", host, connectAddr);
         }
+        if (connectAddr[0] && std::strcmp(connectAddr, host) != 0)
+            DBG.info("TLS: DNS OK %s -> %s", host, connectAddr);
+        else
+            DBG.warn("TLS: DNS parse fail, using hostname");
     } else {
-        DBG.warn("TLS: DNS fail [%.40s], trying hostname", r);
+        DBG.warn("TLS: DNS fail [%.40s], using hostname", r);
     }
 
     // AT+CIPOPEN=<id>,"TCP","<ip_or_host>",<port>
+    // Модем сначала отвечает "OK", затем асинхронно "+CIPOPEN: <id>,<err>"
     m_modem.flushRx_pub();
     std::snprintf(cmd, sizeof(cmd),
                   "AT+CIPOPEN=%u,\"TCP\",\"%s\",%u\r\n",
@@ -292,7 +297,10 @@ int A7670CTls::connect(const char* host, uint16_t port)
     DBG.info("TLS: CIPOPEN to %s:%u", connectAddr, (unsigned)port);
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
 
-    // Ответ: +CIPOPEN: <id>,0  (0 = success)
+    // Шаг 1: ждём "OK" (подтверждение приёма команды), таймаут 3с
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 3000);
+
+    // Шаг 2: ждём асинхронный "+CIPOPEN: <id>,<err>", таймаут 15с
     m_modem.waitFor_pub(r, sizeof(r), "+CIPOPEN:", 15000);
     if (!std::strstr(r, "+CIPOPEN:")) {
         DBG.error("TLS: CIPOPEN no response [%.80s]", r);
