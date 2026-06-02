@@ -385,9 +385,10 @@ struct RuntimeConfig
     uint8_t eth_dns[4]   {}; ///< DNS server address
 
     // --- GSM ---
-    char gsm_apn[32]  {}; ///< GSM/GPRS APN string
-    char gsm_user[32] {}; ///< APN authentication username (empty = none)
-    char gsm_pass[32] {}; ///< APN authentication password
+    char gsm_apn[32]       {}; ///< GSM/GPRS APN string
+    char gsm_user[32]      {}; ///< APN authentication username (empty = none)
+    char gsm_pass[32]      {}; ///< APN authentication password
+    char gsm_server_ip[16] {}; ///< IP override for GSM when DNS unavailable
 
     // --- timing (legacy flat fields) ---
     uint32_t poll_interval_sec   = 5; ///< Legacy poll interval in seconds (superseded by meas.poll_interval_s)
