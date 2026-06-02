@@ -125,6 +125,78 @@ void RuntimeConfig::setDefaultsFromConfig() {
     battery_low_pct        = 20;
     wifi_ssid[0]           = 0;
     wifi_pass[0]           = 0;
+
+    // ================================================================
+    // rtu_ports[0..2] — три датчиковых порта (USART3 / UART4 / UART5)
+    // Инициализируем все три независимо от legacy-полей выше.
+    // Порт 0 включён по умолчанию и наследует legacy-значения modbus_*.
+    // Порты 1 и 2 выключены — включаются через веб-интерфейс.
+    // ================================================================
+
+    // ---- Порт 0: USART3, RS-485, Modbus RTU ----
+    {
+        auto& p0 = rtu_ports[0];
+        p0.enabled             = true;
+        copyStr(p0.uart_name, sizeof(p0.uart_name), "USART3");
+        p0.baudrate            = Config::PORT0_DEFAULT_BAUD;
+        p0.data_bits           = 8;
+        p0.stop_bits           = Config::PORT0_DEFAULT_STOP;
+        p0.parity              = Config::PORT0_DEFAULT_PARITY;
+        p0.response_timeout_ms = Config::MODBUS_TIMEOUT_MS;
+        p0.inter_frame_ms      = 10;
+        p0.interface           = UartInterface::RS485;
+        p0.avg_count           = Config::PORT0_DEFAULT_AVG;
+        copyStr(p0.backup_filename, sizeof(p0.backup_filename), Config::PORT0_BACKUP_FILE);
+
+        // Один датчик по умолчанию — наследует legacy modbus_* значения
+        p0.device_count        = 1;
+        auto& d0               = p0.devices[0];
+        d0.enabled             = true;
+        d0.slave_addr          = Config::MODBUS_SLAVE;
+        d0.func_code           = Config::MODBUS_FUNC_CODE;
+        d0.reg_start           = Config::MODBUS_START_REG;
+        d0.reg_count           = Config::MODBUS_NUM_REGS;
+        d0.data_type           = 0;  // INT16
+        d0.scale               = 1.0f;
+        d0.offset              = Config::SENSOR_ZERO_LEVEL;
+        d0.divider             = Config::SENSOR_DIVIDER;
+        copyStr(d0.name, sizeof(d0.name), "Sensor_P0");
+        copyStr(d0.unit, sizeof(d0.unit), "");
+    }
+
+    // ---- Порт 1: UART4, RS-485, выключен ----
+    {
+        auto& p1 = rtu_ports[1];
+        p1.enabled             = false;
+        copyStr(p1.uart_name, sizeof(p1.uart_name), "UART4");
+        p1.baudrate            = Config::PORT1_DEFAULT_BAUD;
+        p1.data_bits           = 8;
+        p1.stop_bits           = Config::PORT1_DEFAULT_STOP;
+        p1.parity              = Config::PORT1_DEFAULT_PARITY;
+        p1.response_timeout_ms = 500;
+        p1.inter_frame_ms      = 10;
+        p1.interface           = UartInterface::RS485;
+        p1.avg_count           = Config::PORT1_DEFAULT_AVG;
+        copyStr(p1.backup_filename, sizeof(p1.backup_filename), Config::PORT1_BACKUP_FILE);
+        p1.device_count        = 0;
+    }
+
+    // ---- Порт 2: UART5, RS-485/RS-232 через MAX3232, выключен ----
+    {
+        auto& p2 = rtu_ports[2];
+        p2.enabled             = false;
+        copyStr(p2.uart_name, sizeof(p2.uart_name), "UART5");
+        p2.baudrate            = Config::PORT2_DEFAULT_BAUD;
+        p2.data_bits           = 8;
+        p2.stop_bits           = Config::PORT2_DEFAULT_STOP;
+        p2.parity              = Config::PORT2_DEFAULT_PARITY;
+        p2.response_timeout_ms = 500;
+        p2.inter_frame_ms      = 10;
+        p2.interface           = UartInterface::RS485;
+        p2.avg_count           = Config::PORT2_DEFAULT_AVG;
+        copyStr(p2.backup_filename, sizeof(p2.backup_filename), Config::PORT2_BACKUP_FILE);
+        p2.device_count        = 0;
+    }
 }
 
 // -----------------------------------------------------------------------------
