@@ -4224,6 +4224,7 @@ void WebServer::handleApiConfig(uint8_t sn){
         "\"eth_ip\":\"%s\",\"eth_sn\":\"%s\",\"eth_gw\":\"%s\",\"eth_dns\":\"%s\","
         // GSM
         "\"gsm_apn\":\"%s\",\"gsm_user\":\"%s\",\"gsm_pass\":\"%s\","
+        "\"gsm_server_ip\":\"%s\"," 
         // WiFi
         "\"wifi_ssid\":\"%s\",\"wifi_pass\":\"%s\","
         // NTP / time
@@ -4262,7 +4263,7 @@ void WebServer::handleApiConfig(uint8_t sn){
         c.meas.schedule_enabled?"true":"false",c.meas.schedule_start,c.meas.schedule_stop,
         eth_dhcp?"true":"false",
         sip,ssn,sgw,sdns,
-        c.gsm_apn, c.gsm_user, c.gsm_pass,
+        c.gsm_apn, c.gsm_user, c.gsm_pass, c.gsm_server_ip,
         c.wifi_ssid, c.wifi_pass,
         c.time_cfg.ntp_enabled?"true":"false",ntp_srv,(int)c.time_cfg.timezone_offset,
         c.web.web_user, c.web.web_pass,
