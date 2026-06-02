@@ -252,15 +252,41 @@ struct ModbusDeviceCfg {
 /**
  * @brief Configuration for one physical RS-485 / Modbus RTU port.
  */
+// ================================================================
+// Physical interface type on a sensor UART port
+// ================================================================
+/**
+ * @brief Selects the physical layer on a sensor UART port.
+ *
+ * Both RS-485 and RS-232 are wired to the same UART peripheral.
+ * Switching is purely logical — the same MCU peripheral is used;
+ * the external transceiver chip (MAX485 / MAX3232) is always
+ * physically present. This field tells the driver which line
+ * discipline to apply (e.g. RS-485 DE/RE timing vs. full-duplex).
+ */
+enum class UartInterface : uint8_t {
+    RS485 = 0, ///< RS-485 half-duplex via MAX485 (default)
+    RS232 = 1  ///< RS-232 full-duplex via MAX3232
+};
+
 struct ModbusRtuPortConfig {
     bool     enabled             = false;    ///< Enable polling on this port
-    char     uart_name[8]        = "USART3"; ///< Peripheral name used for logging ("USART3", "UART4", …)
+    char     uart_name[8]        = "USART3"; ///< Peripheral name: "USART3", "UART4", "UART5"
     uint32_t baudrate            = 9600;     ///< Baud rate in bps
-    uint8_t  data_bits           = 8;        ///< Data bits per frame (typically 8)
+    uint8_t  data_bits           = 8;        ///< Data bits per frame (always 8 for Modbus RTU)
     uint8_t  stop_bits           = 1;        ///< Stop bits: 1 or 2
     uint8_t  parity              = 0;        ///< 0=None, 1=Even, 2=Odd
     uint16_t response_timeout_ms = 500;      ///< Wait time for slave response in ms
     uint16_t inter_frame_ms      = 10;       ///< Silent gap between frames in ms
+
+    // ---- Interface & averaging (per-port) ----
+    UartInterface interface      = UartInterface::RS485; ///< Physical layer: RS-485 or RS-232
+    uint8_t  avg_count           = 1;        ///< Samples to average per reading (1..100); 1 = no averaging
+
+    // ---- Per-port backup file ----
+    /// Backup file for this port on SD (JSONL, max JSONL_LINE_MAX bytes/line).
+    /// Default: "backup_p0.jsn" / "backup_p1.jsn" / "backup_p2.jsn" — set by setDefaultsFromConfig().
+    char backup_filename[20]     = "";       ///< SD backup filename (empty = use global backup.jsn)
 
     static constexpr uint8_t MAX_DEVICES = 8; ///< Maximum slave devices on one port
     ModbusDeviceCfg devices[MAX_DEVICES];      ///< Device configurations
