@@ -622,7 +622,7 @@ void App::init() {
     // Порт 1 (UART4) — если enabled в конфиге
     if (Cfg().rtu_ports[1].enabled) {
         MX_UART4_Init(Cfg().rtu_ports[1]);
-        m_modbusPort1.configure(&huart4, PIN_RS485_DE_PORT, PIN_RS485_DE_PIN);
+        m_modbusPort1.configure(&huart4);  // auto-direction конвертер 2126, DE не нужен
         m_modbusPort1.init();
         DBG.info("[2/9] UART4 port1 OK baud=%lu", (unsigned long)Cfg().rtu_ports[1].baudrate);
     } else {
@@ -631,7 +631,7 @@ void App::init() {
     // Порт 2 (UART5) — если enabled И Iridium выключен
     if (Cfg().rtu_ports[2].enabled && !Cfg().iridium_enabled) {
         MX_UART5_Init(&Cfg().rtu_ports[2]);
-        m_modbusPort2.configure(&huart5, PIN_RS485_DE_PORT, PIN_RS485_DE_PIN);
+        m_modbusPort2.configure(&huart5);  // auto-direction конвертер 2126, DE не нужен
         m_modbusPort2.init();
         DBG.info("[2/9] UART5 port2 OK baud=%lu", (unsigned long)Cfg().rtu_ports[2].baudrate);
     } else if (Cfg().iridium_enabled) {
