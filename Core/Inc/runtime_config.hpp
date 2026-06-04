@@ -292,6 +292,9 @@ struct ModbusRtuPortConfig {
     ModbusDeviceCfg devices[MAX_DEVICES];      ///< Device configurations
     uint8_t         device_count = 0;          ///< Number of valid entries in @p devices
 };
+/// Defined when ModbusRtuPortConfig contains interface/avg_count/backup_filename.
+/// Used in runtime_config.cpp to guard code that references these fields.
+#define MODBUS_RTU_PORT_EXT  1
 
 // ================================================================
 // ModbusTcpDeviceCfg — one Modbus TCP slave device to poll
