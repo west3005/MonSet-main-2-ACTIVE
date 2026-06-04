@@ -14,6 +14,15 @@ ModbusRTU::ModbusRTU(UART_HandleTypeDef* uart,
 {
 }
 
+/* ========= configure() — для объектов, созданных дефолтным конструктором ========= */
+void ModbusRTU::configure(UART_HandleTypeDef* uart,
+                           GPIO_TypeDef* dePort, uint16_t dePin)
+{
+    m_uart   = uart;
+    m_dePort = dePort;
+    m_dePin  = dePin;
+}
+
 /* ========= DE/RE управление ========= */
 void ModbusRTU::setTransmit() {
     HAL_GPIO_WritePin(m_dePort, m_dePin, GPIO_PIN_SET);
@@ -40,8 +49,12 @@ uint16_t ModbusRTU::crc16(const uint8_t* data, uint16_t len)
 /* ========= Init ========= */
 void ModbusRTU::init()
 {
+    if (!m_uart || !m_dePort) {
+        DBG.error("ModbusRTU::init() — порт не сконфигурирован (nullptr), пропуск");
+        return;
+    }
     setReceive();
-    DBG.info("Modbus RTU: инициализирован (USART3 9600 8E2)");
+    DBG.info("ModbusRTU: инициализирован uart=0x%p", static_cast<void*>(m_uart));
 }
 
 /* ========= Чтение регистров ========= */
@@ -49,6 +62,11 @@ ModbusStatus ModbusRTU::readRegisters(uint8_t slave, uint8_t fc,
                                        uint16_t start, uint16_t count,
                                        uint16_t* outRegs, uint32_t timeout)
 {
+    if (!m_uart || !m_dePort) {
+        DBG.error("ModbusRTU::readRegisters() — порт не сконфигурирован, slave=%d", slave);
+        return ModbusStatus::Timeout;
+    }
+
     /* 1. Формируем запрос */
     uint8_t tx[8];
     tx[0] = slave;
