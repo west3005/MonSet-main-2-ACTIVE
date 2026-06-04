@@ -639,13 +639,12 @@ void App::init() {
     } else {
         DBG.info("[2/9] UART5 port2 disabled");
     }
-    // Обновить имена файлов бэкапа из конфига (уже загружен loadFromSd)
-    m_sdBackup.setFilename(Cfg().rtu_ports[0].backup_filename[0]
-                           ? Cfg().rtu_ports[0].backup_filename : Config::PORT0_BACKUP_FILE);
-    m_sdBackup1.setFilename(Cfg().rtu_ports[1].backup_filename[0]
-                            ? Cfg().rtu_ports[1].backup_filename : Config::PORT1_BACKUP_FILE);
-    m_sdBackup2.setFilename(Cfg().rtu_ports[2].backup_filename[0]
-                            ? Cfg().rtu_ports[2].backup_filename : Config::PORT2_BACKUP_FILE);
+    // Имена файлов бэкапа: берём из config.hpp (константы).
+    // backup_filename в rtu_ports дублирует их для UI (/api/config),
+    // но для SdBackup используем compile-time константы — стабильнее.
+    m_sdBackup.setFilename(Config::PORT0_BACKUP_FILE);
+    m_sdBackup1.setFilename(Config::PORT1_BACKUP_FILE);
+    m_sdBackup2.setFilename(Config::PORT2_BACKUP_FILE);
     DBG.info("[3/9] SD init");
     // SD инициализируется всегда — g_sd_disabled выставляется только
     // если MX_SDIO_SD_Init() реально упал (см. main.cpp)
