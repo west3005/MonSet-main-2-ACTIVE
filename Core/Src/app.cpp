@@ -36,6 +36,7 @@ extern "C" {
     extern I2C_HandleTypeDef  hi2c1;
     extern UART_HandleTypeDef huart2;
     extern UART_HandleTypeDef huart3;
+// huart4 объявлен в main.h; определяется CubeMX в main.c (PA0 TX / PA1 RX)
     extern UART_HandleTypeDef huart6;
     extern SPI_HandleTypeDef  hspi1;
     extern RTC_HandleTypeDef  hrtc;
@@ -98,9 +99,40 @@ static inline void avgClearAll() {
 extern volatile bool g_web_exclusive;
 
 static W5500Net eth;
-static UART_HandleTypeDef huart5;
+static UART_HandleTypeDef huart4;  ///< Датчиковый порт 1 — UART4
+static UART_HandleTypeDef huart5;  ///< Датчиковый порт 2 / Iridium — UART5
 
-static void MX_UART5_Init(void) {
+/**
+ * @brief Инициализация UART4 (PC10 TX / PC11 RX) — датчик порт 1.
+ *        Baudrate/parity/stopbits берутся из rtu_ports[1].
+ */
+static void MX_UART4_Init(const ModbusRtuPortConfig& p) {
+    __HAL_RCC_UART4_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    GPIO_InitTypeDef gpio{};
+    gpio.Pin = GPIO_PIN_10; gpio.Mode = GPIO_MODE_AF_PP;
+    gpio.Pull = GPIO_NOPULL; gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Alternate = GPIO_AF8_UART4;
+    HAL_GPIO_Init(GPIOC, &gpio);
+    gpio.Pin = GPIO_PIN_11; gpio.Pull = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOC, &gpio);
+    const uint32_t parLut[3] = { UART_PARITY_NONE, UART_PARITY_EVEN, UART_PARITY_ODD };
+    huart4.Instance          = UART4;
+    huart4.Init.BaudRate     = p.baudrate;
+    huart4.Init.WordLength   = UART_WORDLENGTH_8B;
+    huart4.Init.StopBits     = (p.stop_bits == 2) ? UART_STOPBITS_2 : UART_STOPBITS_1;
+    huart4.Init.Parity       = (p.parity < 3) ? parLut[p.parity] : UART_PARITY_NONE;
+    huart4.Init.Mode         = UART_MODE_TX_RX;
+    huart4.Init.HwFlowCtl    = UART_HWCONTROL_NONE;
+    huart4.Init.OverSampling = UART_OVERSAMPLING_16;
+    HAL_UART_Init(&huart4);
+}
+
+/**
+ * @brief Инициализация UART5 (PC12 TX / PD2 RX) — датчик порт 2 / Iridium.
+ * @param p  конфиг порта 2; nullptr — Iridium defaults (19200 8N1).
+ */
+static void MX_UART5_Init(const ModbusRtuPortConfig* p = nullptr) {
     __HAL_RCC_UART5_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
     __HAL_RCC_GPIOD_CLK_ENABLE();
@@ -112,13 +144,15 @@ static void MX_UART5_Init(void) {
     gpio.Pin = GPIO_PIN_2; gpio.Mode = GPIO_MODE_AF_PP;
     gpio.Pull = GPIO_PULLUP; gpio.Alternate = GPIO_AF8_UART5;
     HAL_GPIO_Init(GPIOD, &gpio);
-    huart5.Instance = UART5;
-    huart5.Init.BaudRate     = 19200;
+    const uint32_t parLut5[3] = { UART_PARITY_NONE, UART_PARITY_EVEN, UART_PARITY_ODD };
+    huart5.Instance          = UART5;
+    huart5.Init.BaudRate     = p ? p->baudrate : 19200;
     huart5.Init.WordLength   = UART_WORDLENGTH_8B;
-    huart5.Init.StopBits     = UART_STOPBITS_1;
-    huart5.Init.Parity       = UART_PARITY_NONE;
+    huart5.Init.StopBits     = (p && p->stop_bits == 2) ? UART_STOPBITS_2 : UART_STOPBITS_1;
+    huart5.Init.Parity       = (p && p->parity < 3) ? parLut5[p->parity] : UART_PARITY_NONE;
     huart5.Init.Mode         = UART_MODE_TX_RX;
     huart5.Init.HwFlowCtl    = UART_HWCONTROL_NONE;
+    huart5.Init.OverSampling = UART_OVERSAMPLING_16;
     HAL_UART_Init(&huart5);
 }
 
@@ -346,8 +380,12 @@ App::App()
     , m_battery()
 {
     m_modbusPorts[0] = &m_modbusPort0;
-    m_modbusPorts[1] = nullptr;
-    m_modbusPorts[2] = nullptr;
+    m_modbusPorts[1] = &m_modbusPort1;
+    m_modbusPorts[2] = &m_modbusPort2;
+    // Имена файлов бэкапа (дефолты); обновятся в setup() после loadFromSd()
+    m_sdBackup.setFilename(Config::PORT0_BACKUP_FILE);
+    m_sdBackup1.setFilename(Config::PORT1_BACKUP_FILE);
+    m_sdBackup2.setFilename(Config::PORT2_BACKUP_FILE);
 }
 
 SystemMode App::readMode() {
@@ -422,13 +460,26 @@ int App::postViaGsm(const char* json,uint16_t len) {
     } else {
         char url[192]{};
         c.buildServerUrl(url, sizeof(url));
-        if(startsWith(url,"https://")) {
+        // Если gsm_server_ip задан — заменяем hostname на IP
+        // (DNS недоступен у некоторых операторов через AT+CDNSGIP)
+        char gsmUrl[192]{};
+        std::strncpy(gsmUrl, url, sizeof(gsmUrl)-1);
+        if (c.gsm_server_ip[0]) {
+            const char* schemeEnd = std::strstr(url, "://");
+            if (schemeEnd) {
+                const char* pathStart = std::strchr(schemeEnd + 3, '/');
+                if (pathStart)
+                    std::snprintf(gsmUrl, sizeof(gsmUrl),
+                                 "https://%s%s", c.gsm_server_ip, pathStart);
+            }
+        }
+        if(startsWith(gsmUrl,"https://")) {
             A7670CTls tls(m_gsm);
             if(c.tls_ca_cert[0])
                 tls.setCaCert(c.tls_ca_cert);
-            code=(int)tls.httpsPost(url,json,len);
+            code=(int)tls.httpsPost(gsmUrl,json,len);
         } else {
-            code=(int)m_gsm.httpPost(url,json,len);
+            code=(int)m_gsm.httpPost(gsmUrl,json,len);
         }
     }
     m_gsm.disconnect(); m_gsm.powerOff(); return code;
@@ -566,7 +617,35 @@ int App::buildMultiSensorPayload(char* buf,size_t bsz,const char* tsStr,const Da
 void App::init() {
     DBG.info("=== APP INIT %s %s ===", __DATE__, __TIME__);
     DBG.info("[1/9] RTC init"); m_rtc.init();
-    DBG.info("[2/9] Modbus init"); m_modbusPort0.init();
+    DBG.info("[2/9] Modbus init");
+    // Порт 0 (USART3) — всегда активен
+    m_modbusPort0.init();
+    // Порт 1 (UART4) — если enabled в конфиге
+    if (Cfg().rtu_ports[1].enabled) {
+        MX_UART4_Init(Cfg().rtu_ports[1]);
+        m_modbusPort1.configure(&huart4);  // auto-direction конвертер 2126, DE не нужен
+        m_modbusPort1.init();
+        DBG.info("[2/9] UART4 port1 OK baud=%lu", (unsigned long)Cfg().rtu_ports[1].baudrate);
+    } else {
+        DBG.info("[2/9] UART4 port1 disabled");
+    }
+    // Порт 2 (UART5) — если enabled И Iridium выключен
+    if (Cfg().rtu_ports[2].enabled && !Cfg().iridium_enabled) {
+        MX_UART5_Init(&Cfg().rtu_ports[2]);
+        m_modbusPort2.configure(&huart5);  // auto-direction конвертер 2126, DE не нужен
+        m_modbusPort2.init();
+        DBG.info("[2/9] UART5 port2 OK baud=%lu", (unsigned long)Cfg().rtu_ports[2].baudrate);
+    } else if (Cfg().iridium_enabled) {
+        DBG.info("[2/9] UART5 reserved for Iridium — port2 skipped");
+    } else {
+        DBG.info("[2/9] UART5 port2 disabled");
+    }
+    // Имена файлов бэкапа: берём из config.hpp (константы).
+    // backup_filename в rtu_ports дублирует их для UI (/api/config),
+    // но для SdBackup используем compile-time константы — стабильнее.
+    m_sdBackup.setFilename(Config::PORT0_BACKUP_FILE);
+    m_sdBackup1.setFilename(Config::PORT1_BACKUP_FILE);
+    m_sdBackup2.setFilename(Config::PORT2_BACKUP_FILE);
     DBG.info("[3/9] SD init");
     // SD инициализируется всегда — g_sd_disabled выставляется только
     // если MX_SDIO_SD_Init() реально упал (см. main.cpp)
@@ -583,7 +662,7 @@ void App::init() {
     Cfg().log();
     DBG.info("[5/9] Modem power OFF (cold start)"); m_gsm.powerOff();
     DBG.info("[6/9] Iridium GPIO + UART5 init");
-    if(Cfg().iridium_enabled){ InitIridiumGpio(); MX_UART5_Init(); DBG.info("Iridium UART5 OK"); }
+    if(Cfg().iridium_enabled){ InitIridiumGpio(); MX_UART5_Init(nullptr); DBG.info("Iridium UART5 OK (19200 8N1)"); }
     DBG.info("[7/9] ESP8266 GPIO init"); InitEspGpio();
     DBG.info("[8/9] Battery monitor init");
     m_battery.init(); m_battery.update();
@@ -616,6 +695,18 @@ void App::initChannelManager() {
     if(Cfg().wifi_enabled)    m_channelMgr.registerChannel(Channel::WIFI,    sendViaWifi,   this);
     if(Cfg().iridium_enabled) m_channelMgr.registerChannel(Channel::IRIDIUM, sendViaIridium,this);
     if(Cfg().eth_enabled&&eth.ready()) m_channelMgr.markAlive(Channel::ETHERNET);
+}
+
+void App::reinitChannelManager() {
+    m_channelMgr.init(&m_sdBackup);  // сброс + повторная регистрация
+    if(Cfg().eth_enabled)     m_channelMgr.registerChannel(Channel::ETHERNET,sendViaEth,    this);
+    if(Cfg().gsm_enabled)     m_channelMgr.registerChannel(Channel::GSM,     sendViaGsm,    this);
+    if(Cfg().wifi_enabled)    m_channelMgr.registerChannel(Channel::WIFI,    sendViaWifi,   this);
+    if(Cfg().iridium_enabled) m_channelMgr.registerChannel(Channel::IRIDIUM, sendViaIridium,this);
+    if(Cfg().eth_enabled&&eth.ready()) m_channelMgr.markAlive(Channel::ETHERNET);
+    DBG.info("[CFG] ChMgr reinit: eth=%d gsm=%d wifi=%d irid=%d",
+        (int)Cfg().eth_enabled,(int)Cfg().gsm_enabled,
+        (int)Cfg().wifi_enabled,(int)Cfg().iridium_enabled);
 }
 
 bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
@@ -877,15 +968,32 @@ void App::transmitSingle(float value,const DateTime& dt) {
 void App::transmitBuffer() { retransmitBackup(); }
 
 void App::retransmitBackup() {
-    while(m_sdBackup.exists()){
-        uint32_t lines=0; FSIZE_t used=0;
-        const uint32_t maxPayload=(Config::HTTP_CHUNK_MAX<Config::JSON_BUFFER_SIZE)
-                                   ?Config::HTTP_CHUNK_MAX:(Config::JSON_BUFFER_SIZE-1);
-        bool ok=m_sdBackup.readChunkAsJsonArray(m_json,sizeof(m_json),maxPayload,lines,used);
-        if(!ok||lines==0||used==0) return;
-        SendResult result=m_channelMgr.sendData(m_json,(uint16_t)std::strlen(m_json));
-        if(result==SendResult::Ok){ m_sdBackup.consumePrefix(used); }
-        else { DBG.error("Backup retransmit failed"); return; }
+    // Отправляем последовательно: порт 0 → порт 1 → порт 2
+    // Каждый файл передаётся полностью до перехода к следующему.
+    SdBackup* backs[3] = { &m_sdBackup, &m_sdBackup1, &m_sdBackup2 };
+    const uint32_t maxPayload = (Config::HTTP_CHUNK_MAX < Config::JSON_BUFFER_SIZE)
+                                 ? Config::HTTP_CHUNK_MAX
+                                 : (Config::JSON_BUFFER_SIZE - 1);
+    for (uint8_t p = 0; p < 3; p++) {
+        SdBackup* bk = backs[p];
+        if (!bk->exists()) continue;
+        DBG.info("Backup retransmit port%u file=%s", (unsigned)p, bk->filename());
+        while (bk->exists()) {
+            uint32_t lines = 0; FSIZE_t used = 0;
+            bool ok = bk->readChunkAsJsonArray(m_json, sizeof(m_json), maxPayload, lines, used);
+            if (!ok || lines == 0 || used == 0) {
+                DBG.warn("Backup port%u: empty or unreadable, skip", (unsigned)p);
+                break;
+            }
+            SendResult result = m_channelMgr.sendData(m_json, (uint16_t)std::strlen(m_json));
+            if (result == SendResult::Ok) {
+                bk->consumePrefix(used);
+            } else {
+                DBG.error("Backup retransmit port%u failed, abort", (unsigned)p);
+                return;  // прерываем всю цепочку — связь пропала
+            }
+        }
+        DBG.info("Backup port%u fully transmitted", (unsigned)p);
     }
-    DBG.info("Backup fully transmitted");
+    DBG.info("All backups transmitted (ports 0-2)");
 }

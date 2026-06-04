@@ -37,6 +37,33 @@ public:
     uint16_t  waitFor_pub(char* buf, uint16_t bsize,
                           const char* expected, uint32_t timeout)
               { return waitFor(buf, bsize, expected, timeout); }
+    void      flushRx_pub() { g_air780_rxbuf.clear(); }
+
+    /// waitFor без 50мс ограничения простоя — для асинхронных URC типа +CIPOPEN.
+    /// Читает до нахождения expected, ERROR или истечения timeout.
+    uint16_t  waitForUrc_pub(char* buf, uint16_t bsize,
+                              const char* expected, uint32_t timeout)
+    {
+        if (!buf || !expected || bsize < 2) return 0;
+        uint16_t idx   = 0;
+        uint32_t start = HAL_GetTick();
+        std::memset(buf, 0, bsize);
+        while (idx < (uint16_t)(bsize - 1) && (HAL_GetTick() - start) < timeout) {
+            uint8_t ch;
+            if (g_air780_rxbuf.pop(ch)) {
+                buf[idx++] = static_cast<char>(ch);
+                buf[idx]   = '\0';
+                if (std::strstr(buf, expected))    break;
+                if (std::strstr(buf, "+CME ERROR")) break;
+                if (std::strstr(buf, "ERROR\r\n")) break;
+            } else {
+                HAL_Delay(1);
+            }
+            IWDG->KR = 0xAAAA;
+        }
+        buf[idx] = '\0';
+        return idx;
+    }
 
     static constexpr uint8_t HTTP_SOCK_IDX = 0;
     static constexpr uint8_t TLS_SOCK_IDX  = 1;

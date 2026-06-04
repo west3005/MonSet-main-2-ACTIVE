@@ -59,8 +59,25 @@ void SdBackup::make_full_path(char* out, size_t out_sz, const char* fname) const
 }
 
 /* ------------------------------------------------------------------ */
+void SdBackup::setFilename(const char* name)
+{
+    if (!name || name[0] == '\0') {
+        std::strncpy(m_filename, m_filename, sizeof(m_filename) - 1);
+    } else {
+        std::strncpy(m_filename, name, sizeof(m_filename) - 1);
+    }
+    m_filename[sizeof(m_filename) - 1] = '\0';
+}
+
+/* ------------------------------------------------------------------ */
 bool SdBackup::init()
 {
+    // Заполнить дефолтное имя файла если setFilename() не был вызван
+    if (m_filename[0] == '\0') {
+        std::strncpy(m_filename, m_filename, sizeof(m_filename) - 1);
+        m_filename[sizeof(m_filename) - 1] = '\0';
+    }
+
     if (m_broken) {
         DBG.warn("SD: previously marked as broken, skip init");
         m_mounted = false;
@@ -113,7 +130,7 @@ bool SdBackup::exists() const
 {
     if (!m_mounted) return false;
     char path[64];
-    make_full_path(path, sizeof(path), Config::BACKUP_FILENAME);
+    make_full_path(path, sizeof(path), m_filename);
     FILINFO fno;
     return (f_stat(path, &fno) == FR_OK);
 }
@@ -123,7 +140,7 @@ bool SdBackup::remove()
 {
     if (!m_mounted) return false;
     char path[64];
-    make_full_path(path, sizeof(path), Config::BACKUP_FILENAME);
+    make_full_path(path, sizeof(path), m_filename);
     FRESULT fr = f_unlink(path);
     if (fr != FR_OK) {
         DBG.error("SD: unlink fail path=%s (FR=%d %s)", path, (int)fr, frStr(fr));
@@ -243,7 +260,7 @@ bool SdBackup::appendLine(const char* jsonLine)
     }
 
     char path[64];
-    make_full_path(path, sizeof(path), Config::BACKUP_FILENAME);
+    make_full_path(path, sizeof(path), m_filename);
 
     FIL     f{};
     FRESULT fr       = FR_INT_ERR;
@@ -313,7 +330,7 @@ bool SdBackup::readChunkAsJsonArray(char* out, uint32_t outSize,
     if (maxPayloadBytes < 4) return false;
 
     char path[64];
-    make_full_path(path, sizeof(path), Config::BACKUP_FILENAME);
+    make_full_path(path, sizeof(path), m_filename);
 
     FIL f{};
     FRESULT fr = f_open(&f, path, FA_READ);
@@ -373,9 +390,17 @@ bool SdBackup::consumePrefix(FSIZE_t bytesUsedFromFile)
     if (!m_mounted || bytesUsedFromFile == 0) return true;
 
     char path[64];
-    make_full_path(path, sizeof(path), Config::BACKUP_FILENAME);
+    make_full_path(path, sizeof(path), m_filename);
     char tmpPath[64];
-    make_full_path(tmpPath, sizeof(tmpPath), "backup.tmp");
+    {
+        // Derive temp filename from m_filename (e.g. "backup_p0.jsn" → "backup_p0.tmp")
+        char tmpName[24];
+        std::strncpy(tmpName, m_filename, sizeof(tmpName) - 1);
+        tmpName[sizeof(tmpName) - 1] = '\0';
+        char* dot = std::strrchr(tmpName, '.');
+        if (dot) std::strncpy(dot, ".tmp", 5);
+        make_full_path(tmpPath, sizeof(tmpPath), tmpName);
+    }
 
     FIL src{};
     FRESULT fr = f_open(&src, path, FA_READ);

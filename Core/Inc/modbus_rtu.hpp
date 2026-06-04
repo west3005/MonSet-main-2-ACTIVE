@@ -23,15 +23,44 @@ enum class ModbusStatus : uint8_t {
 class ModbusRTU {
 public:
     /**
-     * @brief  Конструктор
-     * @param  uart — USART для RS-485 (huart3)
-     * @param  dePort — порт DE/RE пина
+     * @brief  Конструктор с параметрами (для m_modbusPort0 — инициализируется сразу).
+     * @param  uart   — USART handle (huart3 / huart4 / huart5)
+     * @param  dePort — GPIO порт пина DE/RE
      * @param  dePin  — номер пина DE/RE
      */
     ModbusRTU(UART_HandleTypeDef* uart,
               GPIO_TypeDef* dePort, uint16_t dePin);
 
-    /** Инициализация (DE/RE в режим приёма) */
+    /**
+     * @brief  Дефолтный конструктор — для хранения в классе App как член.
+     *         UART не назначен; требует вызова configure() перед init().
+     */
+    ModbusRTU() = default;
+
+    /**
+     * @brief  Назначить UART и пин DE/RE после дефолтной конструкции.
+     *         Вызывать перед init() для портов 1 и 2.
+     * @param  uart   — UART handle (например &huart4)
+     * @param  dePort — GPIO порт пина DE/RE (nullptr = auto-direction конвертер, DE не нужен)
+     * @param  dePin  — номер пина DE/RE (0 если dePort=nullptr)
+     */
+    void configure(UART_HandleTypeDef* uart,
+                   GPIO_TypeDef* dePort, uint16_t dePin);
+
+    /**
+     * @brief  Перегрузка для конвертеров без DE (auto-direction, например 2126).
+     *         setTransmit()/setReceive() будут пропущены — направление управляется аппаратно.
+     * @param  uart — UART handle
+     */
+    void configure(UART_HandleTypeDef* uart);
+
+    /** @brief Возвращает true если UART назначен через конструктор или configure(). */
+    bool isConfigured() const { return m_uart != nullptr; }
+
+    /**
+     * @brief  Инициализация. Если dePort=nullptr — DE не управляется (auto-direction).
+     *         Вызывать после configure().
+     */
     void init();
 
     /**
@@ -42,7 +71,7 @@ public:
      * @param  count   — количество
      * @param  outRegs — массив для результата
      * @param  timeout — мс
-     * @retval Статус
+     * @retval Статус (Timeout если порт не сконфигурирован)
      */
     ModbusStatus readRegisters(uint8_t slave, uint8_t fc,
                                 uint16_t start, uint16_t count,
@@ -53,9 +82,9 @@ public:
     static uint16_t crc16(const uint8_t* data, uint16_t len);
 
 private:
-    UART_HandleTypeDef* m_uart;
-    GPIO_TypeDef*       m_dePort;
-    uint16_t            m_dePin;
+    UART_HandleTypeDef* m_uart   = nullptr;  ///< nullptr пока не назначен
+    GPIO_TypeDef*       m_dePort = nullptr;
+    uint16_t            m_dePin  = 0;
 
     void setTransmit();
     void setReceive();

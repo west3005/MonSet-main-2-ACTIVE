@@ -16,6 +16,24 @@
 #include <cctype>
 extern "C" {
 #include "ff.h"
+
+// ── base64Encode ─────────────────────────────────────────────────────────────
+static void base64Encode(const char* in, char* out, size_t outSz) {
+    static const char t[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t i = 0, o = 0, len = std::strlen(in);
+    while (i < len && o + 5 < outSz) {
+        uint32_t b = ((uint8_t)in[i]) << 16;
+        if (i + 1 < len) b |= ((uint8_t)in[i + 1]) << 8;
+        if (i + 2 < len) b |=  (uint8_t)in[i + 2];
+        out[o++] = t[(b >> 18) & 0x3F];
+        out[o++] = t[(b >> 12) & 0x3F];
+        out[o++] = (i + 1 < len) ? t[(b >>  6) & 0x3F] : '=';
+        out[o++] = (i + 2 < len) ? t[ b        & 0x3F] : '=';
+        i += 3;
+    }
+    out[o] = 0;
+}
 }
 
 static RuntimeConfig g_cfg;
@@ -53,6 +71,7 @@ void RuntimeConfig::setDefaultsFromConfig() {
     copyStr(gsm_apn,  sizeof(gsm_apn),  Config::GSM_APN);
     copyStr(gsm_user, sizeof(gsm_user), Config::GSM_APN_USER);
     copyStr(gsm_pass, sizeof(gsm_pass), Config::GSM_APN_PASS);
+    gsm_server_ip[0] = '\0';
 
     poll_interval_sec   = Config::POLL_INTERVAL_SEC;
     send_interval_polls = Config::SEND_INTERVAL_POLLS;
@@ -106,6 +125,84 @@ void RuntimeConfig::setDefaultsFromConfig() {
     battery_low_pct        = 20;
     wifi_ssid[0]           = 0;
     wifi_pass[0]           = 0;
+
+    // ================================================================
+    // rtu_ports[0..2] — три датчиковых порта (USART3 / UART4 / UART5)
+    // Инициализируем все три независимо от legacy-полей выше.
+    // Порт 0 включён по умолчанию и наследует legacy-значения modbus_*.
+    // Порты 1 и 2 выключены — включаются через веб-интерфейс.
+    // ================================================================
+
+    // ---- Порт 0: USART3, RS-485, Modbus RTU ----
+    {
+        auto& p0 = rtu_ports[0];
+        p0.enabled             = true;
+        copyStr(p0.uart_name, sizeof(p0.uart_name), "USART3");
+        p0.baudrate            = Config::PORT0_DEFAULT_BAUD;
+        p0.data_bits           = 8;
+        p0.stop_bits           = Config::PORT0_DEFAULT_STOP;
+        p0.parity              = Config::PORT0_DEFAULT_PARITY;
+        p0.response_timeout_ms = Config::MODBUS_TIMEOUT_MS;
+        p0.inter_frame_ms      = 10;
+#ifdef MODBUS_RTU_PORT_EXT
+        p0.interface           = UartInterface::RS485;
+        p0.avg_count           = Config::PORT0_DEFAULT_AVG;
+        copyStr(p0.backup_filename, sizeof(p0.backup_filename), Config::PORT0_BACKUP_FILE);
+#endif
+
+        // Один датчик по умолчанию — наследует legacy modbus_* значения
+        p0.device_count        = 1;
+        auto& d0               = p0.devices[0];
+        d0.enabled             = true;
+        d0.slave_addr          = Config::MODBUS_SLAVE;
+        d0.func_code           = Config::MODBUS_FUNC_CODE;
+        d0.reg_start           = Config::MODBUS_START_REG;
+        d0.reg_count           = Config::MODBUS_NUM_REGS;
+        d0.data_type           = 0;  // INT16
+        d0.scale               = 1.0f;
+        d0.offset              = Config::SENSOR_ZERO_LEVEL;
+        d0.divider             = Config::SENSOR_DIVIDER;
+        copyStr(d0.name, sizeof(d0.name), "Sensor_P0");
+        copyStr(d0.unit, sizeof(d0.unit), "");
+    }
+
+    // ---- Порт 1: UART4, RS-485, выключен ----
+    {
+        auto& p1 = rtu_ports[1];
+        p1.enabled             = false;
+        copyStr(p1.uart_name, sizeof(p1.uart_name), "UART4");
+        p1.baudrate            = Config::PORT1_DEFAULT_BAUD;
+        p1.data_bits           = 8;
+        p1.stop_bits           = Config::PORT1_DEFAULT_STOP;
+        p1.parity              = Config::PORT1_DEFAULT_PARITY;
+        p1.response_timeout_ms = 500;
+        p1.inter_frame_ms      = 10;
+#ifdef MODBUS_RTU_PORT_EXT
+        p1.interface           = UartInterface::RS485;
+        p1.avg_count           = Config::PORT1_DEFAULT_AVG;
+        copyStr(p1.backup_filename, sizeof(p1.backup_filename), Config::PORT1_BACKUP_FILE);
+#endif
+        p1.device_count        = 0;
+    }
+
+    // ---- Порт 2: UART5, RS-485/RS-232 через MAX3232, выключен ----
+    {
+        auto& p2 = rtu_ports[2];
+        p2.enabled             = false;
+        copyStr(p2.uart_name, sizeof(p2.uart_name), "UART5");
+        p2.baudrate            = Config::PORT2_DEFAULT_BAUD;
+        p2.data_bits           = 8;
+        p2.stop_bits           = Config::PORT2_DEFAULT_STOP;
+        p2.parity              = Config::PORT2_DEFAULT_PARITY;
+        p2.response_timeout_ms = 500;
+        p2.inter_frame_ms      = 10;
+#ifdef MODBUS_RTU_PORT_EXT
+        p2.interface           = UartInterface::RS485;
+        p2.avg_count           = Config::PORT2_DEFAULT_AVG;
+        copyStr(p2.backup_filename, sizeof(p2.backup_filename), Config::PORT2_BACKUP_FILE);
+#endif
+        p2.device_count        = 0;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -410,6 +507,19 @@ static void parseRtuPortInner(const char* obj, ModbusRtuPortConfig& rp) {
         else if (std::strcmp(parStr,"Even")==0 || std::strcmp(parStr,"even")==0) rp.parity = 1;
         else if (std::strcmp(parStr,"Odd") ==0 || std::strcmp(parStr,"odd") ==0) rp.parity = 2;
     }
+#ifdef MODBUS_RTU_PORT_EXT
+    // interface: "RS485" (0) / "RS232" (1)
+    { char ifStr[8]{};
+      if (jsonGetString(obj, "if", ifStr, sizeof(ifStr)))
+          rp.interface = (std::strcmp(ifStr,"RS232")==0) ? UartInterface::RS232
+                                                         : UartInterface::RS485; }
+    // avg_count per-port (1..100)
+    { uint8_t v = 0;
+      if (jsonGetU8(obj, "avg", v) && v > 0 && v <= 100)
+          rp.avg_count = v; }
+    // backup filename
+    jsonGetString(obj, "bak", rp.backup_filename, sizeof(rp.backup_filename));
+#endif
     // parse devs[] array inline
     const char* devsKey = "\"devs\"";
     const char* dp = std::strstr(obj, devsKey);
@@ -533,9 +643,10 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
     (void)jsonGetIpv4(json, "eth_gw",    tmp.eth_gw);
     (void)jsonGetIpv4(json, "eth_dns",   tmp.eth_dns);
 
-    (void)jsonGetString(json, "gsm_apn",  tmp.gsm_apn,  sizeof(tmp.gsm_apn));
-    (void)jsonGetString(json, "gsm_user", tmp.gsm_user, sizeof(tmp.gsm_user));
-    (void)jsonGetString(json, "gsm_pass", tmp.gsm_pass, sizeof(tmp.gsm_pass));
+    (void)jsonGetString(json, "gsm_apn",       tmp.gsm_apn,       sizeof(tmp.gsm_apn));
+    (void)jsonGetString(json, "gsm_user",      tmp.gsm_user,      sizeof(tmp.gsm_user));
+    (void)jsonGetString(json, "gsm_pass",      tmp.gsm_pass,      sizeof(tmp.gsm_pass));
+    (void)jsonGetString(json, "gsm_server_ip", tmp.gsm_server_ip, sizeof(tmp.gsm_server_ip));
 
     (void)jsonGetU32(json, "poll_interval_sec",   tmp.poll_interval_sec);
     (void)jsonGetU32(json, "send_interval_polls",  tmp.send_interval_polls);
@@ -715,6 +826,13 @@ bool RuntimeConfig::loadFromJson(const char* json, size_t len) {
       if (jsonGetString(json,"ocean_username", s,sizeof(s))) copyStr(tmp.proto.ocean_username,  sizeof(tmp.proto.ocean_username),  s); }
     { char s[64]{};
       if (jsonGetString(json,"ocean_password", s,sizeof(s))) copyStr(tmp.proto.ocean_password,  sizeof(tmp.proto.ocean_password),  s); }
+    /* Авто-формируем server_auth_b64 из ocean_username:password */
+    if (tmp.proto.ocean_username[0] && tmp.proto.ocean_password[0]) {
+        char creds[160]{};
+        std::snprintf(creds, sizeof(creds), "%s:%s",
+            tmp.proto.ocean_username, tmp.proto.ocean_password);
+        base64Encode(creds, tmp.server_auth_b64, sizeof(tmp.server_auth_b64));
+    }
     { char s[64]{};
       if (jsonGetString(json,"ocean_metric_id",s,sizeof(s))) copyStr(tmp.proto.ocean_metric_id, sizeof(tmp.proto.ocean_metric_id), s); }
 
@@ -966,6 +1084,7 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
         "\"gsm_apn\":\"%s\","
         "\"gsm_user\":\"%s\","
         "\"gsm_pass\":\"%s\","
+        "\"gsm_server_ip\":\"%s\","
         "\"poll_interval_sec\":%lu,"
         "\"send_interval_polls\":%lu,"
         "\"modbus_slave\":%u,"
@@ -981,7 +1100,7 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
         complex_enabled?"true":"false",
         metric_id, complex_id, server_url, server_auth_b64,
         ethModeStr, macStr, ip, sn, gw, dns,
-        gsm_apn, gsm_user, gsm_pass,
+        gsm_apn, gsm_user, gsm_pass, gsm_server_ip,
         (unsigned long)poll_interval_sec,
         (unsigned long)send_interval_polls,
         (unsigned)modbus_slave, (unsigned)modbus_func,
@@ -1059,11 +1178,19 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
         const char* parStr = (rp.parity==1)?"Even":(rp.parity==2)?"Odd":"None";
         n += std::snprintf(json+n,sizeof(json)-n,
             "%s{\"en\":%s,\"baud\":%lu,\"sb\":%u,\"par\":\"%s\","
+#ifdef MODBUS_RTU_PORT_EXT
+            "\"if\":\"%s\",\"avg\":%u,\"bak\":\"%s\","
+#endif
             "\"rms\":%u,\"fms\":%u,\"devs\":[",
             i==0?"":",",
             rp.enabled?"true":"false",
             (unsigned long)rp.baudrate,
             (unsigned)rp.stop_bits, parStr,
+#ifdef MODBUS_RTU_PORT_EXT
+            (rp.interface == UartInterface::RS232) ? "RS232" : "RS485",
+            (unsigned)rp.avg_count,
+            rp.backup_filename,
+#endif
             (unsigned)rp.response_timeout_ms,
             (unsigned)rp.inter_frame_ms);
         if (n<0||n>=(int)sizeof(json)) goto overflow;
@@ -1143,6 +1270,8 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
             "\"poll_interval_s\":%u,"
             "\"send_interval_s\":%u,"
             "\"backup_retry_s\":%u,"
+            "\"backup_retry_gsm_sec\":%lu,"
+            "\"backup_retry_iridium_sec\":%lu,"
             "\"deep_sleep_enabled\":%s,"
             "\"deep_sleep_s\":%u,"
             "\"schedule_enabled\":%s,"
@@ -1186,6 +1315,8 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
             proto.server_host, proto.server_token, (unsigned)proto.server_port,
             (unsigned)meas.poll_interval_s, (unsigned)meas.send_interval_s,
             (unsigned)meas.backup_retry_s,
+            (unsigned long)backup_retry_gsm_sec,
+            (unsigned long)backup_retry_iridium_sec,
             meas.deep_sleep_enabled?"true":"false", (unsigned)meas.deep_sleep_s,
             meas.schedule_enabled?"true":"false",
             meas.schedule_start, meas.schedule_stop,

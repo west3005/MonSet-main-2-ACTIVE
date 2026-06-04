@@ -4213,6 +4213,7 @@ void WebServer::handleApiConfig(uint8_t sn){
         "\"mqtt_host\":\"%s\",\"mqtt_port\":%u,\"mqtt_user\":\"%s\",\"mqtt_pass\":\"%s\","
         "\"mqtt_topic\":\"%s\",\"mqtt_qos\":%u,\"mqtt_tls\":%s,"
         "\"webhook_url\":\"%s\",\"webhook_method\":\"%s\","
+        "\"server_host\":\"%s\",\"server_path\":\"%s\",\"server_port\":%u,\"server_token\":\"%s\","
         // measurement
         "\"poll_interval_s\":%lu,\"send_interval_s\":%lu,"
         "\"backup_retry_s\":%u,\"avg_count\":%u,"
@@ -4224,6 +4225,7 @@ void WebServer::handleApiConfig(uint8_t sn){
         "\"eth_ip\":\"%s\",\"eth_sn\":\"%s\",\"eth_gw\":\"%s\",\"eth_dns\":\"%s\","
         // GSM
         "\"gsm_apn\":\"%s\",\"gsm_user\":\"%s\",\"gsm_pass\":\"%s\","
+        "\"gsm_server_ip\":\"%s\","
         // WiFi
         "\"wifi_ssid\":\"%s\",\"wifi_pass\":\"%s\","
         // NTP / time
@@ -4255,6 +4257,8 @@ void WebServer::handleApiConfig(uint8_t sn){
         mq_host, (unsigned)mq_port, mq_user, mq_pass,
         mq_top, (unsigned)c.proto.mqtt_qos, (c.proto.mqtt_tls||c.mqtt_tls)?"true":"false",
         wh_url, wh_meth,
+        c.proto.server_host, c.proto.server_path,
+        (unsigned)c.proto.server_port, c.proto.server_token,
         (unsigned long)poll_s,(unsigned long)send_s,
         (unsigned)bkup_s,(unsigned)avg,
         (unsigned long)c.backup_retry_gsm_sec,(unsigned long)c.backup_retry_iridium_sec,
@@ -4262,7 +4266,7 @@ void WebServer::handleApiConfig(uint8_t sn){
         c.meas.schedule_enabled?"true":"false",c.meas.schedule_start,c.meas.schedule_stop,
         eth_dhcp?"true":"false",
         sip,ssn,sgw,sdns,
-        c.gsm_apn, c.gsm_user, c.gsm_pass,
+        c.gsm_apn, c.gsm_user, c.gsm_pass, c.gsm_server_ip,
         c.wifi_ssid, c.wifi_pass,
         c.time_cfg.ntp_enabled?"true":"false",ntp_srv,(int)c.time_cfg.timezone_offset,
         c.web.web_user, c.web.web_pass,
@@ -4295,14 +4299,19 @@ void WebServer::handleApiConfig(uint8_t sn){
         const ModbusRtuPortConfig& rp = c.rtu_ports[i];
         const char* parStr = (rp.parity == 1) ? "Even" :
                              (rp.parity == 2) ? "Odd"  : "None";
+        const char* ifStr  = (rp.interface == UartInterface::RS232) ? "RS232" : "RS485";
         n += std::snprintf(m_respBuf+n, RESP_BUF_SIZE-n,
             "%s{\"en\":%s,\"baud\":%lu,\"sb\":%u,\"par\":\"%s\","
+            "\"if\":\"%s\",\"avg\":%u,\"bak\":\"%s\","
             "\"rms\":%u,\"fms\":%u,\"devs\":[",
             i==0?"":",",
             rp.enabled?"true":"false",
             (unsigned long)rp.baudrate,
             (unsigned)rp.stop_bits,
             parStr,
+            ifStr,
+            (unsigned)rp.avg_count,
+            rp.backup_filename,
             (unsigned)rp.response_timeout_ms,
             (unsigned)rp.inter_frame_ms
         );
@@ -4625,6 +4634,9 @@ void WebServer::handlePostConfig(uint8_t sn,const char* body){
         if (sdSaved) m_sdOk = true;
 
         Cfg() = tmp;
+
+        /* Пересоздать каналы по новой конфигурации — без перезагрузки */
+        if (m_app) m_app->reinitChannelManager();
 
         /* Статические JSON-ответы — без snprintf/буфера, нет риска переполнения */
         static const char RESP_SD[]  = "{\"status\":\"ok\",\"saved_to_sd\":true}";

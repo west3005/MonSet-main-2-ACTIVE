@@ -188,6 +188,7 @@ body{padding:0;display:flex;flex-direction:row;min-height:100dvh}
 <div id="eth_st" style="display:none"><div class="r"><div class="f"><label>IP</label><input type="text" id="eth_ip" onchange="c('eth_ip',this.value)"></div><div class="f"><label>Маска</label><input type="text" id="eth_sn" onchange="c('eth_sn',this.value)"></div><div class="f"><label>Шлюз</label><input type="text" id="eth_gw" onchange="c('eth_gw',this.value)"></div><div class="f"><label>DNS</label><input type="text" id="eth_dns" onchange="c('eth_dns',this.value)"></div></div></div>
 <div class="sh">GSM</div>
 <div class="r"><div class="f"><label>APN</label><input type="text" id="gsm_apn" onchange="c('gsm_apn',this.value)"></div><div class="f"><label>Пользователь</label><input type="text" id="gsm_user" onchange="c('gsm_user',this.value)"></div><div class="f"><label>Пароль</label><input type="password" id="gsm_pass" onchange="c('gsm_pass',this.value)"></div></div>
+<div class="r"><div class="f"><label>GSM IP (если DNS недоступен)</label><input type="text" id="gsm_server_ip" placeholder="31.28.3.159" onchange="c('gsm_server_ip',this.value)"></div></div>
 <div class="sh">WiFi</div>
 <div class="r"><div class="f"><label>SSID</label><input type="text" id="wifi_ssid" onchange="c('wifi_ssid',this.value)"></div><div class="f"><label>Пароль</label><input type="password" id="wifi_pass" onchange="c('wifi_pass',this.value)"></div></div>
 </div></details>
@@ -365,7 +366,7 @@ function reloadCfg(){
     var tx=['server_host','server_token','server_path','server_port','tb_host','tb_token','tb_port','mqtt_host','mqtt_port','mqtt_user','mqtt_topic',
             'mqtt_pass','webhook_url','poll_interval_s','send_interval_s','backup_retry_s',
             'avg_count','deep_sleep_s','schedule_start','schedule_stop','sl_port','sl_uid',
-            'sl_sock','sl_ctms','eth_ip','eth_sn','eth_gw','eth_dns','gsm_apn','gsm_user',
+            'sl_sock','sl_ctms','eth_ip','eth_sn','eth_gw','eth_dns','gsm_apn','gsm_server_ip','gsm_user',
             'gsm_pass','wifi_ssid','wifi_pass','ntp_server','web_user','web_pass','web_port',
             'web_idle_timeout_s','batt_low','alert_webhook_url','channel_timeout_s',
             'channel_retry_s','channel_max_retries',
@@ -417,7 +418,7 @@ function syncSaveFields(){
   bk.forEach(function(k){var e=document.getElementById(k);if(e)cfg[k]=e.checked});
   var tx=['server_host','server_token','server_path','tb_host','tb_token','mqtt_host','mqtt_user','mqtt_topic',
           'mqtt_pass','webhook_url','schedule_start','schedule_stop','eth_ip','eth_sn',
-          'eth_gw','eth_dns','gsm_apn','gsm_user','gsm_pass','wifi_ssid','wifi_pass',
+          'eth_gw','eth_dns','gsm_apn','gsm_server_ip','gsm_user','gsm_pass','wifi_ssid','wifi_pass',
           'ntp_server','web_user','web_pass','alert_webhook_url',
           'ocean_host','ocean_path','ocean_username','ocean_password','ocean_metric_id'];
   tx.forEach(function(k){var e=document.getElementById(k);if(e)cfg[k]=e.value});

@@ -1,27 +1,26 @@
 /**
  * ================================================================
  * @file    a7670c_tls.cpp
- * @brief   TLS-туннель поверх A7670C TCP-сокета.
+ * @brief   TLS-туннель поверх A7670C через AT+CIPOPEN/CIPSEND/CIPRXGET.
  *
  * Транспортный слой:
- *   mbedTLS вызывает biosend/biorecv, которые отправляют/читают
- *   данные через AT+CSOSEND / AT+CSORCVDATA (A7670C TCP socket).
+ *   mbedTLS → biosend/biorecv → AT+CIPSEND/AT+CIPRXGET → A7670C UART
  *
- * Отличия от SIM7020C (sim7020c_tls.cpp):
- *   - AT+CSOSEND=<id>,<len>  — A7670C принимает бинарный поток
- *     (prompt '>', затем N байт, затем ОК)
- *   - AT+CSORCVDATA=<id>,<maxLen> — возвращает данные в бинаре
- *   - Максимальный чанк: 1460 байт (MTU) на CSOSEND
- *   - Ответ CSORCVDATA: "+CSORCVDATA: <id>,<len>\r\n<data>"
+ * AT-команды (A76XX Series AT Command Manual):
+ *   Буферизация : AT+CIPRXGET=1          (один раз перед CIPOPEN)
+ *   Открытие    : AT+CIPOPEN=<id>,"TCP","<host>",<port>
+ *   Отправка    : AT+CIPSEND=<id>,<len>  → prompt ">" → данные → OK
+ *   Приём       : AT+CIPRXGET=2,<id>,<len> → +CIPRXGET:2,<id>,<actual>,<pending>\r\n<data>
+ *   Закрытие    : AT+CIPCLOSE=<id>
  *
- * Память:
- *   mbedTLS требует ~40-80 КБ RAM для TLS 1.2.
- *   STM32F407 192 КБ RAM — достаточно.
- *   При нехватке: MBEDTLS_SSL_MAX_CONTENT_LEN = 4096
+ * Отличие от CSOC-подхода:
+ *   AT+CSOC требует AT+NETOPEN + отдельного IP-стека.
+ *   AT+CIPOPEN работает поверх PDP-контекста (CGACT) напрямую — надёжнее.
  * ================================================================
  */
 #include "a7670c_tls.hpp"
 #include "debug_uart.hpp"
+#include "runtime_config.hpp"
 
 extern "C" {
 #include "mbedtls/net_sockets.h"
@@ -37,6 +36,7 @@ extern "C" {
 // ============================================================================
 static constexpr uint16_t MODEM_MAX_SEND = 512;
 static constexpr uint16_t MODEM_MAX_RECV = 512;
+static constexpr uint8_t  CIP_LINK       = 0;    ///< A7670C: первый доступный link
 
 // ============================================================================
 // Конструктор / Деструктор
@@ -95,7 +95,6 @@ bool A7670CTls::parseHttpsUrl(const char* url, UrlParts& out)
     if (std::strncmp(url, prefix, prefixLen) != 0) return false;
 
     const char* p = url + prefixLen;
-
     const char* hb = p;
     while (*p && *p != '/' && *p != ':') p++;
     size_t hl = (size_t)(p - hb);
@@ -121,51 +120,48 @@ bool A7670CTls::parseHttpsUrl(const char* url, UrlParts& out)
 }
 
 // ============================================================================
-// Транспорт: отправка через AT+CSOSEND (A7670C)
-// Формат: AT+CSOSEND=<id>,<len>\r\n  → prompt '>' → <binary data> → OK
+// BIO: отправка через AT+CIPSEND=<id>,<len>
+// Prompt ">", затем бинарные данные, затем OK
 // ============================================================================
 int A7670CTls::modemWriteRaw(const uint8_t* buf, uint16_t len)
 {
     if (!buf || len == 0) return 0;
 
     uint16_t sent = 0;
-    char cmd[64];
-    char r[64];
+    char cmd[64], r[128];
 
     while (sent < len) {
         uint16_t chunk = len - sent;
         if (chunk > MODEM_MAX_SEND) chunk = MODEM_MAX_SEND;
 
         std::snprintf(cmd, sizeof(cmd),
-                      "AT+CSOSEND=%hhu,%u\r\n", m_sockId, (unsigned)chunk);
+                      "AT+CIPSEND=%hhu,%u\r\n", m_sockId, (unsigned)chunk);
+        m_modem.flushRx_pub();
         m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
 
-        // Ждём prompt '>'
         m_modem.waitFor_pub(r, sizeof(r), ">", 3000);
         if (!std::strstr(r, ">")) {
-            DBG.error("TLS BIO: нет prompt '>' для CSOSEND");
+            DBG.error("TLS BIO: нет prompt \'>\'  для CIPSEND (chunk=%u)", (unsigned)chunk);
             return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
         }
 
-        // Отправляем бинарные данные прямо в UART
         m_modem.sendRaw_pub(reinterpret_cast<const char*>(buf + sent), chunk);
 
-        // Ждём OK
-        m_modem.waitFor_pub(r, sizeof(r), "OK", 3000);
-        if (!std::strstr(r, "OK")) {
-            DBG.warn("TLS BIO: CSOSEND не ответил OK (chunk=%u)", (unsigned)chunk);
+        // A7670C отвечает "OK" (не "SEND OK" как Air780E)
+        m_modem.waitFor_pub(r, sizeof(r), "OK", 5000);
+        if (!std::strstr(r, "OK") && !std::strstr(r, "SEND OK")) {
+            DBG.warn("TLS BIO: CIPSEND нет OK (chunk=%u)", (unsigned)chunk);
         }
 
         sent += chunk;
         IWDG->KR = 0xAAAA;
     }
-
     return (int)sent;
 }
 
 // ============================================================================
-// Транспорт: приём через AT+CSORCVDATA (A7670C)
-// Ответ: "+CSORCVDATA: <id>,<len>\r\n<binary data>\r\nOK"
+// BIO: приём через AT+CIPRXGET=2,<id>,<len>
+// Ответ: +CIPRXGET: 2,<id>,<actual>,<pending>\r\n<data>\r\nOK
 // ============================================================================
 int A7670CTls::modemReadRaw(uint8_t* buf, uint16_t len)
 {
@@ -176,19 +172,21 @@ int A7670CTls::modemReadRaw(uint8_t* buf, uint16_t len)
     char r[MODEM_MAX_RECV + 128];
 
     std::snprintf(cmd, sizeof(cmd),
-                  "AT+CSORCVDATA=%hhu,%u\r\n", m_sockId, (unsigned)want);
+                  "AT+CIPRXGET=2,%hhu,%u\r\n", m_sockId, (unsigned)want);
+    m_modem.flushRx_pub();
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
 
-    uint16_t rxLen = m_modem.waitFor_pub(r, sizeof(r), "+CSORCVDATA:", 3000);
-    (void)rxLen;
+    uint16_t rxLen = m_modem.waitFor_pub(r, sizeof(r), "+CIPRXGET:", 3000);
 
-    if (!std::strstr(r, "+CSORCVDATA:")) {
+    if (!std::strstr(r, "+CIPRXGET:")) {
         return MBEDTLS_ERR_SSL_WANT_READ;
     }
 
-    const char* p = std::strstr(r, "+CSORCVDATA:");
-    int id = 0, recvLen = 0;
-    if (std::sscanf(p, "+CSORCVDATA: %d,%d", &id, &recvLen) != 2 || recvLen <= 0) {
+    // Парсим: +CIPRXGET: 2,<id>,<actual>,<pending>
+    const char* p = std::strstr(r, "+CIPRXGET:");
+    int mode = 0, id = 0, actual = 0, pending = 0;
+    if (std::sscanf(p, "+CIPRXGET: %d,%d,%d,%d",
+                    &mode, &id, &actual, &pending) < 3 || actual <= 0) {
         return MBEDTLS_ERR_SSL_WANT_READ;
     }
 
@@ -196,9 +194,8 @@ int A7670CTls::modemReadRaw(uint8_t* buf, uint16_t len)
     if (!dataStart) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     dataStart++;
 
-    uint16_t copy = (uint16_t)recvLen;
+    uint16_t copy = (uint16_t)actual;
     if (copy > len) copy = (uint16_t)len;
-
     size_t available = rxLen - (size_t)(dataStart - r);
     if (available < copy) copy = (uint16_t)available;
 
@@ -214,10 +211,7 @@ int A7670CTls::biosend(void* ctx, const unsigned char* buf, size_t len)
 {
     auto* self = static_cast<A7670CTls*>(ctx);
     if (!self || !buf || len == 0) return 0;
-
-    if (HAL_GetTick() > self->m_deadline)
-        return MBEDTLS_ERR_SSL_TIMEOUT;
-
+    if (HAL_GetTick() > self->m_deadline) return MBEDTLS_ERR_SSL_TIMEOUT;
     uint16_t toSend = (len > MODEM_MAX_SEND) ? MODEM_MAX_SEND : (uint16_t)len;
     int r = self->modemWriteRaw(buf, toSend);
     if (r <= 0) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
@@ -228,13 +222,9 @@ int A7670CTls::biorecv(void* ctx, unsigned char* buf, size_t len)
 {
     auto* self = static_cast<A7670CTls*>(ctx);
     if (!self || !buf || len == 0) return 0;
-
-    if (HAL_GetTick() > self->m_deadline)
-        return MBEDTLS_ERR_SSL_TIMEOUT;
-
+    if (HAL_GetTick() > self->m_deadline) return MBEDTLS_ERR_SSL_TIMEOUT;
     uint16_t toRead = (len > MODEM_MAX_RECV) ? MODEM_MAX_RECV : (uint16_t)len;
     int r = self->modemReadRaw(buf, toRead);
-
     if (r == MBEDTLS_ERR_SSL_WANT_READ) return r;
     if (r < 0) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     if (r == 0) return MBEDTLS_ERR_SSL_WANT_READ;
@@ -242,51 +232,102 @@ int A7670CTls::biorecv(void* ctx, unsigned char* buf, size_t len)
 }
 
 // ============================================================================
-// connect(): TCP + TLS handshake
+// connect(): TCP open (CIPOPEN) + режим буферизации + TLS handshake
 // ============================================================================
 int A7670CTls::connect(const char* host, uint16_t port)
 {
-    DBG.info("TLS: connect %s:%u", host, port);
+    DBG.info("TLS: connect %s:%u (via CIPOPEN)", host, port);
     m_deadline = HAL_GetTick() + m_timeoutMs;
+    m_sockId   = CIP_LINK;
 
     char r[256], cmd[128];
 
-    // Закрыть предыдущий сокет
-    std::snprintf(cmd, sizeof(cmd), "AT+CSOCL=%hhu\r\n", m_sockId);
+    // Закрыть предыдущий линк (может не существовать — ERROR допустим)
+    m_modem.flushRx_pub();
+    std::snprintf(cmd, sizeof(cmd), "AT+CIPCLOSE=%hhu\r\n", m_sockId);
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-    HAL_Delay(100);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    HAL_Delay(200);
 
-    // Создать TCP-сокет
-    m_modem.sendRaw_pub("AT+CSOC=1,1,1\r\n", 16);
-    m_modem.waitFor_pub(r, sizeof(r), "+CSOC:", 3000);
-    if (!std::strstr(r, "+CSOC:") && !std::strstr(r, "OK")) {
-        DBG.error("TLS: CSOC create failed");
-        return -1;
+    // DNS-резолв через модем (AT+CDNSGIP) — некоторые прошивки A7670C
+    // не резолвят hostname внутри CIPOPEN, требуют IP напрямую
+    char connectAddr[64];
+    std::strncpy(connectAddr, host, sizeof(connectAddr) - 1);
+    connectAddr[sizeof(connectAddr) - 1] = '\0';
+
+    m_modem.flushRx_pub();
+    std::snprintf(cmd, sizeof(cmd), "AT+CDNSGIP=\"%s\"\r\n", host);
+    m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
+    DBG.info("TLS: DNS resolving %s...", host);
+    // Формат A7670C: +CDNSGIP: 1,<count>,"host","ip1","ip2",...
+    // Успех = "+CDNSGIP: 1", ошибка = "+CDNSGIP: 0,<errcode>"
+    uint16_t dnsRxLen = m_modem.waitFor_pub(r, sizeof(r), "+CDNSGIP:", 10000);
+    (void)dnsRxLen;
+    if (std::strstr(r, "+CDNSGIP: 1")) {
+        // Пропускаем три запятые: "1,<count>,"host","ip"
+        const char* p1 = std::strstr(r, "+CDNSGIP: 1");
+        const char* c1 = std::strchr(p1, ',');           // после "1"
+        if (c1) c1 = std::strchr(c1 + 1, ',');          // после count
+        if (c1) c1 = std::strchr(c1 + 1, ',');          // после "host"
+        if (c1) {
+            c1++;
+            while (*c1 == ' ' || *c1 == '"') c1++;
+            size_t ipLen = 0;
+            while (c1[ipLen] && c1[ipLen] != '"' && c1[ipLen] != '\r' &&
+                   c1[ipLen] != '\n' && ipLen < sizeof(connectAddr) - 1) {
+                connectAddr[ipLen] = c1[ipLen];
+                ipLen++;
+            }
+            connectAddr[ipLen] = '\0';
+        }
+        if (connectAddr[0] && std::strcmp(connectAddr, host) != 0)
+            DBG.info("TLS: DNS OK %s -> %s", host, connectAddr);
+        else
+            DBG.warn("TLS: DNS parse fail, using hostname");
+    } else {
+        DBG.warn("TLS: DNS fail [%.40s], using hostname", r);
     }
-    const char* sp = std::strstr(r, "+CSOC:");
-    if (sp) std::sscanf(sp, "+CSOC: %hhu", &m_sockId);
 
-    // Подключиться к серверу
+    // AT+CIPOPEN=<id>,"TCP","<ip_or_host>",<port>
+    // Модем сначала отвечает "OK", затем асинхронно "+CIPOPEN: <id>,<err>"
+    m_modem.flushRx_pub();
     std::snprintf(cmd, sizeof(cmd),
-                  "AT+CSOCON=%hhu,%u,\"%s\"\r\n", m_sockId, port, host);
+                  "AT+CIPOPEN=%u,\"TCP\",\"%s\",%u\r\n",
+                  (unsigned)m_sockId, connectAddr, (unsigned)port);
+    DBG.info("TLS: CIPOPEN to %s:%u", connectAddr, (unsigned)port);
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-    m_modem.waitFor_pub(r, sizeof(r), "OK", 15000);
-    if (!std::strstr(r, "OK")) {
-        DBG.error("TLS: CSOCON failed host=%s:%u", host, port);
-        return -2;
-    }
-    DBG.info("TLS: TCP socket open OK (id=%hhu)", m_sockId);
 
-    // mbedTLS seed
+    // +CIPOPEN: приходит асинхронно после OK — waitFor прерывается по 50мс тишины
+    // и не ждёт URC. Используем waitForUrc_pub — без 50мс ограничения, только
+    // по маркеру или таймауту 18с.
+    {
+        char cipBuf[256] = {};
+        m_modem.waitForUrc_pub(cipBuf, sizeof(cipBuf), "+CIPOPEN:", 18000);
+
+        if (!std::strstr(cipBuf, "+CIPOPEN:")) {
+            DBG.error("TLS: CIPOPEN no response [%.80s]", cipBuf);
+            return -1;
+        }
+        int id = 0, err = -1;
+        const char* p = std::strstr(cipBuf, "+CIPOPEN:");
+        std::sscanf(p, "+CIPOPEN: %d,%d", &id, &err);
+        if (err != 0) {
+            DBG.error("TLS: CIPOPEN err=%d addr=%s:%u", err, connectAddr, (unsigned)port);
+            return -2;
+        }
+        std::memcpy(r, cipBuf, sizeof(r));
+    }
+    DBG.info("TLS: TCP open OK (link=%u)", (unsigned)m_sockId);
+
+    // ---- mbedTLS seed ----
     const char* pers = "a7670c_tls";
     int rc = mbedtls_ctr_drbg_seed(&m_ctr,
-                                    mbedtls_entropy_func,
-                                    &m_entropy,
+                                    mbedtls_entropy_func, &m_entropy,
                                     reinterpret_cast<const unsigned char*>(pers),
                                     std::strlen(pers));
     if (rc != 0) { logMbedtlsErr("TLS: ctr_drbg_seed", rc); close(); return -10; }
 
-    // CA cert
+    // ---- CA cert ----
     if (m_caPem) {
         rc = mbedtls_x509_crt_parse(&m_cacert,
                                      reinterpret_cast<const unsigned char*>(m_caPem),
@@ -294,7 +335,7 @@ int A7670CTls::connect(const char* host, uint16_t port)
         if (rc < 0) { logMbedtlsErr("TLS: x509_crt_parse", rc); close(); return -11; }
     }
 
-    // SSL config
+    // ---- SSL config ----
     rc = mbedtls_ssl_config_defaults(&m_conf,
                                       MBEDTLS_SSL_IS_CLIENT,
                                       MBEDTLS_SSL_TRANSPORT_STREAM,
@@ -311,113 +352,44 @@ int A7670CTls::connect(const char* host, uint16_t port)
         DBG.warn("TLS: VERIFY_NONE (CA cert не задан)");
     }
 
+    // ---- SSL setup ----
     rc = mbedtls_ssl_setup(&m_ssl, &m_conf);
     if (rc != 0) { logMbedtlsErr("TLS: ssl_setup", rc); close(); return -13; }
 
     rc = mbedtls_ssl_set_hostname(&m_ssl, host);
     if (rc != 0) { logMbedtlsErr("TLS: set_hostname", rc); close(); return -14; }
 
-    mbedtls_ssl_set_bio(&m_ssl, this, A7670CTls::biosend, A7670CTls::biorecv, nullptr);
+    mbedtls_ssl_set_bio(&m_ssl, this,
+                         A7670CTls::biosend,
+                         A7670CTls::biorecv,
+                         nullptr);
 
-    // TLS Handshake
-    DBG.info("TLS: handshake...");
-    while ((rc = mbedtls_ssl_handshake(&m_ssl)) != 0) {
-        if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) {
-            logMbedtlsErr("TLS: handshake failed", rc);
-            close();
-            return -20;
+    // ---- TLS handshake ----
+    DBG.info("TLS: handshake start...");
+    while (true) {
+        rc = mbedtls_ssl_handshake(&m_ssl);
+        if (rc == 0) break;
+        if (rc == MBEDTLS_ERR_SSL_WANT_READ ||
+            rc == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            if (HAL_GetTick() > m_deadline) {
+                DBG.error("TLS: handshake timeout");
+                close(); return -20;
+            }
+            HAL_Delay(5);
+            IWDG->KR = 0xAAAA;
+            continue;
         }
-        if (HAL_GetTick() > m_deadline) {
-            DBG.error("TLS: handshake timeout");
-            close();
-            return -21;
-        }
-        IWDG->KR = 0xAAAA;
+        logMbedtlsErr("TLS: handshake", rc);
+        close(); return -21;
     }
 
-    DBG.info("TLS: handshake OK, cipher=%s",
-             mbedtls_ssl_get_ciphersuite(&m_ssl));
+    DBG.info("TLS: OK, cipher=%s", mbedtls_ssl_get_ciphersuite(&m_ssl));
     m_connected = true;
     return 0;
 }
 
 // ============================================================================
-// HTTPS POST
-// ============================================================================
-uint16_t A7670CTls::httpsPost(const char* url, const char* json, uint16_t len)
-{
-    if (!url || !json || len == 0) return 0;
-
-    UrlParts u{};
-    if (!parseHttpsUrl(url, u)) {
-        DBG.error("A7670C HTTPS: плохой URL: %s", url);
-        return 0;
-    }
-
-    if (!m_connected) {
-        if (connect(u.host, u.port) != 0) return 0;
-    }
-
-    // Формируем HTTP-запрос
-    char hdr[600];
-    int hdrLen = std::snprintf(hdr, sizeof(hdr),
-        "POST %s HTTP/1.1\r\n"
-        "Host: %s\r\n"
-        "Content-Type: application/json\r\n"
-        "Content-Length: %u\r\n"
-        "Connection: close\r\n"
-        "\r\n",
-        u.path, u.host, (unsigned)len);
-
-    // Отправить заголовок через TLS
-    int rc = mbedtls_ssl_write(&m_ssl,
-                                reinterpret_cast<const unsigned char*>(hdr),
-                                (size_t)hdrLen);
-    if (rc < 0) {
-        logMbedtlsErr("A7670C HTTPS: write header", rc);
-        close(); return 0;
-    }
-
-    // Отправить тело
-    rc = mbedtls_ssl_write(&m_ssl,
-                            reinterpret_cast<const unsigned char*>(json),
-                            len);
-    if (rc < 0) {
-        logMbedtlsErr("A7670C HTTPS: write body", rc);
-        close(); return 0;
-    }
-
-    // Читаем ответ
-    uint8_t rxBuf[512]{};
-    uint16_t code = 0;
-    uint32_t deadline = HAL_GetTick() + 15000;
-
-    while (HAL_GetTick() < deadline) {
-        rc = mbedtls_ssl_read(&m_ssl, rxBuf, sizeof(rxBuf) - 1);
-        if (rc == MBEDTLS_ERR_SSL_WANT_READ) {
-            IWDG->KR = 0xAAAA;
-            continue;
-        }
-        if (rc <= 0) break;
-
-        rxBuf[rc] = '\0';
-        DBG.data("A7670C HTTPS rx: %s", (char*)rxBuf);
-
-        if (code == 0) {
-            const char* p = std::strstr((char*)rxBuf, "HTTP/1.");
-            if (p) std::sscanf(p, "HTTP/1.%*c %hu", &code);
-        }
-        if (code != 0) break;
-        IWDG->KR = 0xAAAA;
-    }
-
-    close();
-    DBG.info("A7670C HTTPS: response code %u", (unsigned)code);
-    return code;
-}
-
-// ============================================================================
-// close()
+// close
 // ============================================================================
 void A7670CTls::close()
 {
@@ -425,9 +397,120 @@ void A7670CTls::close()
         mbedtls_ssl_close_notify(&m_ssl);
         m_connected = false;
     }
-    char r[64], cmd[32];
-    std::snprintf(cmd, sizeof(cmd), "AT+CSOCL=%hhu\r\n", m_sockId);
+
+    char cmd[32], r[64];
+    m_modem.flushRx_pub();
+    std::snprintf(cmd, sizeof(cmd), "AT+CIPCLOSE=%hhu\r\n", m_sockId);
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-    HAL_Delay(100);
-    DBG.info("TLS: соединение закрыто");
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+
+    tlsFree();
+}
+
+// ============================================================================
+// httpsPost — полный цикл: connect + POST + read response + close
+// ============================================================================
+int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
+{
+    UrlParts u{};
+    if (!parseHttpsUrl(url, u)) {
+        DBG.error("TLS: bad URL: %s", url ? url : "(null)");
+        return -1;
+    }
+
+    int rc = connect(u.host, u.port);
+    if (rc != 0) {
+        DBG.error("TLS: connect failed rc=%d", rc);
+        return -2;
+    }
+
+    // HTTP-заголовок
+    char hdr[700];
+    int hdrLen;
+    const char* auth = Cfg().server_auth_b64;
+    if (auth && auth[0]) {
+        hdrLen = std::snprintf(hdr, sizeof(hdr),
+            "POST %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "Authorization: Basic %s\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: %u\r\n"
+            "Connection: close\r\n"
+            "\r\n",
+            u.path, u.host, auth, (unsigned)jsonLen);
+    } else {
+        hdrLen = std::snprintf(hdr, sizeof(hdr),
+            "POST %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: %u\r\n"
+            "Connection: close\r\n"
+            "\r\n",
+            u.path, u.host, (unsigned)jsonLen);
+    }
+
+    if (hdrLen <= 0 || (size_t)hdrLen >= sizeof(hdr)) {
+        DBG.error("TLS HTTP: header overflow");
+        close(); return -50;
+    }
+
+    // Отправляем заголовок + тело через mbedTLS
+    int w;
+    size_t off = 0;
+    const uint8_t* hdrBuf = reinterpret_cast<const uint8_t*>(hdr);
+    while (off < (size_t)hdrLen) {
+        w = mbedtls_ssl_write(&m_ssl, hdrBuf + off, (size_t)hdrLen - off);
+        if (w > 0) { off += (size_t)w; continue; }
+        if (w == MBEDTLS_ERR_SSL_WANT_READ || w == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            HAL_Delay(2); IWDG->KR = 0xAAAA; continue;
+        }
+        logMbedtlsErr("TLS HTTP: write header", w);
+        close(); return -51;
+    }
+
+    off = 0;
+    const uint8_t* jsonBuf = reinterpret_cast<const uint8_t*>(json);
+    while (off < (size_t)jsonLen) {
+        w = mbedtls_ssl_write(&m_ssl, jsonBuf + off, (size_t)jsonLen - off);
+        if (w > 0) { off += (size_t)w; continue; }
+        if (w == MBEDTLS_ERR_SSL_WANT_READ || w == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            HAL_Delay(2); IWDG->KR = 0xAAAA; continue;
+        }
+        logMbedtlsErr("TLS HTTP: write body", w);
+        close(); return -52;
+    }
+
+    // Читаем HTTP-ответ
+    static char rx[1024];
+    int used = 0, httpCode = -1;
+    const uint32_t t0 = HAL_GetTick();
+
+    while ((HAL_GetTick() - t0) < m_timeoutMs) {
+        int r = mbedtls_ssl_read(&m_ssl,
+                                  reinterpret_cast<unsigned char*>(rx + used),
+                                  (size_t)(sizeof(rx) - 1 - used));
+        if (r > 0) {
+            used += r;
+            rx[used] = '\0';
+            const char* p = std::strstr(rx, "HTTP/1.");
+            if (p) {
+                int code = 0;
+                if (std::sscanf(p, "HTTP/%*s %d", &code) == 1) {
+                    httpCode = code;
+                    DBG.info("TLS HTTP: code=%d", httpCode);
+                    break;
+                }
+            }
+            continue;
+        }
+        if (r == 0) break;
+        if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            HAL_Delay(5); IWDG->KR = 0xAAAA; continue;
+        }
+        logMbedtlsErr("TLS HTTP: read response", r);
+        break;
+    }
+
+    close();
+    return httpCode;
 }

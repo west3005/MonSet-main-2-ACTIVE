@@ -76,6 +76,43 @@ constexpr uint16_t HTTP_LOCAL_PORT        = 50000;
 constexpr uint8_t  DS3231_ADDR            = 0x68 << 1;
 
 // ================================================================
+// UART назначения (источник истины — board_pins.hpp и MonSet.ioc)
+// ================================================================
+#define UART_DEBUG    huart1   ///< Debug UART → Serial Monitor (PA9/PA10, 115200)
+#define UART_GSM      huart2   ///< GSM модем A7670C / Air780E (PA2/PA3, 115200)
+// Датчиковые порты — настраиваются в runtime_config.json / веб-интерфейсе
+#define UART_PORT_0   huart3   ///< Датчик порт 0 — USART3 (PB10/PB11, RS-485 DE=PB12)
+// Порты 1 (UART4) и 2 (UART5) используют auto-direction конвертеры (2126 / SP3485-AD)
+// Пин DE не требуется — конвертер переключает направление автоматически по TX IDLE
+#define UART_PORT_1   huart4   ///< Датчик порт 1 — UART4  (PC10/PC11, RS-485/RS-232)
+#define UART_PORT_2   huart5   ///< Датчик порт 2 — UART5  (PC12/PD2,  RS-485/RS-232 через MAX3232)
+#define UART_WIFI     huart6   ///< ESP8266/ESP32 WiFi (PC6/PC7, 115200)
+
+// ================================================================
+// Дефолты датчиковых портов (применяются в setDefaultsFromConfig)
+// ================================================================
+// Порт 0 (USART3) — дефолтный Modbus RTU, обратная совместимость с текущим конфигом
+constexpr uint32_t PORT0_DEFAULT_BAUD      = 9600;
+constexpr uint8_t  PORT0_DEFAULT_STOP      = 1;
+constexpr uint8_t  PORT0_DEFAULT_PARITY    = 0;     ///< 0=None
+constexpr uint8_t  PORT0_DEFAULT_AVG       = 1;
+constexpr const char* PORT0_BACKUP_FILE    = "backup_p0.jsn";
+
+// Порт 1 (UART4) — универсальный, по умолчанию выключен
+constexpr uint32_t PORT1_DEFAULT_BAUD      = 9600;
+constexpr uint8_t  PORT1_DEFAULT_STOP      = 1;
+constexpr uint8_t  PORT1_DEFAULT_PARITY    = 0;
+constexpr uint8_t  PORT1_DEFAULT_AVG       = 1;
+constexpr const char* PORT1_BACKUP_FILE    = "backup_p1.jsn";
+
+// Порт 2 (UART5) — универсальный, по умолчанию выключен
+constexpr uint32_t PORT2_DEFAULT_BAUD      = 9600;
+constexpr uint8_t  PORT2_DEFAULT_STOP      = 1;
+constexpr uint8_t  PORT2_DEFAULT_PARITY    = 0;
+constexpr uint8_t  PORT2_DEFAULT_AVG       = 1;
+constexpr const char* PORT2_BACKUP_FILE    = "backup_p2.jsn";
+
+// ================================================================
 // Modbus RTU
 // ================================================================
 constexpr uint8_t  MODBUS_SLAVE           = 1;
