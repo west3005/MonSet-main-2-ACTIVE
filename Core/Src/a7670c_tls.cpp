@@ -261,28 +261,14 @@ int A7670CTls::connect(const char* host, uint16_t port)
     DBG.info("TLS: DNS resolving %s...", host);
     // Формат A7670C: +CDNSGIP: 1,<count>,"host","ip1","ip2",...
     // Успех = "+CDNSGIP: 1", ошибка = "+CDNSGIP: 0,<errcode>"
-    // Ждём полный ответ DNS: A7670C присылает два URC:
-    //   OK\r\n+CDNSGIP: 1,"host","ip"\r\n  — или — +CDNSGIP: 0,8\r\n
-    // waitFor по маркеру "+CDNSGIP:" обрезает первый пакет — ждём "OK" после него
-    m_modem.waitFor_pub(r, sizeof(r), "OK", 3000);   // синхронный OK на команду
-    uint16_t dnsRxLen = m_modem.waitForUrc_pub(r, sizeof(r), "+CDNSGIP:", 10000);
+    uint16_t dnsRxLen = m_modem.waitFor_pub(r, sizeof(r), "+CDNSGIP:", 10000);
     (void)dnsRxLen;
     if (std::strstr(r, "+CDNSGIP: 1")) {
-        // A7670C формат: +CDNSGIP: 1,"host","ip1"[,"ip2"...]
-        // Пропускаем до второй кавычки-запятой: ,"ip"
+        // Пропускаем три запятые: "1,<count>,"host","ip"
         const char* p1 = std::strstr(r, "+CDNSGIP: 1");
-        // Пропускаем через запятые: 1 → count(опц.) → "host" → "ip"
-        const char* c1 = p1 ? std::strchr(p1, ',') : nullptr; // после 1
-        // Ищем IP: последнее вхождение ," перед \r или \0
-        if (c1) {
-            const char* tmp = c1;
-            const char* last_comma_quote = nullptr;
-            while ((tmp = std::strstr(tmp, ",\""))) {
-                last_comma_quote = tmp;
-                tmp++;
-            }
-            c1 = last_comma_quote;
-        }
+        const char* c1 = std::strchr(p1, ',');           // после "1"
+        if (c1) c1 = std::strchr(c1 + 1, ',');          // после count
+        if (c1) c1 = std::strchr(c1 + 1, ',');          // после "host"
         if (c1) {
             c1++;
             while (*c1 == ' ' || *c1 == '"') c1++;
@@ -316,7 +302,7 @@ int A7670CTls::connect(const char* host, uint16_t port)
     // по маркеру или таймауту 18с.
     {
         char cipBuf[256] = {};
-        m_modem.waitForUrc_pub(cipBuf, sizeof(cipBuf), "+CIPOPEN:", 30000);
+        m_modem.waitForUrc_pub(cipBuf, sizeof(cipBuf), "+CIPOPEN:", 18000);
 
         if (!std::strstr(cipBuf, "+CIPOPEN:")) {
             DBG.error("TLS: CIPOPEN no response [%.80s]", cipBuf);
