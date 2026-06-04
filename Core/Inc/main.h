@@ -32,7 +32,9 @@ extern "C" {
 /* ======== HAL-Р РЋРІР‚В¦Р РЋР РЉР В Р вЂ¦Р В РўвЂР В Р’В»Р РЋРІР‚в„– (extern) ======== */
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
-extern UART_HandleTypeDef huart3;
+extern UART_HandleTypeDef huart3;  ///< Датчиковый порт 0 — USART3 (PB10/PB11, DE=PB12)
+extern UART_HandleTypeDef huart4;  ///< Датчиковый порт 1 — UART4  (PC10/PC11, auto-dir)
+extern UART_HandleTypeDef huart5;  ///< Датчиковый порт 2 — UART5  (PC12/PD2,  auto-dir)
 extern UART_HandleTypeDef huart6;
 extern I2C_HandleTypeDef  hi2c1;
 extern SPI_HandleTypeDef  hspi1;
