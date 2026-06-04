@@ -33,7 +33,7 @@ extern "C" {
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
 extern UART_HandleTypeDef huart3;  ///< Датчиковый порт 0 — USART3 PB10(TX)/PB11(RX), DE=PB12
-extern UART_HandleTypeDef huart4;  ///< Датчиковый порт 1 — UART4  PA0(TX)/PA1(RX)
+// huart4 объявлен static в app.cpp — определён там же через MX_UART4_Init()
 extern UART_HandleTypeDef huart6;
 extern I2C_HandleTypeDef  hi2c1;
 extern SPI_HandleTypeDef  hspi1;
