@@ -123,8 +123,14 @@ void A7670C::powerOn()
     HAL_Delay(1500);
     HAL_GPIO_WritePin(PIN_CELL_PWRKEY_PORT, PIN_CELL_PWRKEY_PIN, GPIO_PIN_SET);
 
-    if (!waitRdyA7670(25000))
+    if (!waitRdyA7670(25000)) {
         DBG.warn("A7670C: ME PDN ACT не получен — пробуем AT");
+        // Дополнительная пауза: модем ещё загружается, SIM не инициализирована
+        HAL_Delay(3000);
+    }
+    // Сбрасываем буфер UART после загрузки модема
+    __HAL_UART_FLUSH_DRREGISTER(m_uart);
+    g_air780_rxbuf.clear();
 }
 
 void A7670C::powerOff()
@@ -247,13 +253,23 @@ GsmStatus A7670C::init()
     sendCommand("E0", r, sizeof(r), 2000);
     sendCommand("E0", r, sizeof(r), 2000);
     sendCommand("+IPR=115200", r, sizeof(r), 2000);
-    sendCommand("&W", r, sizeof(r), 2000);
+    // AT&W не поддерживается A7670C — пропускаем
     sendCommand("+CTZU=1", r, sizeof(r), Config::SIM7020_CMD_TIMEOUT_MS);
 
-    sendCommand("+CPIN?", r, sizeof(r), 5000);
-    if (!std::strstr(r, "READY")) {
-        DBG.error("A7670C: SIM не готова");
-        return GsmStatus::NoSim;
+    // Ждём SIM READY до 10 секунд — после включения SIM инициализируется с задержкой
+    {
+        bool simReady = false;
+        for (uint8_t attempt = 0; attempt < 10 && !simReady; attempt++) {
+            sendCommand("+CPIN?", r, sizeof(r), 3000);
+            if (std::strstr(r, "READY")) { simReady = true; break; }
+            DBG.warn("A7670C: SIM не готова (попытка %u/10): %.30s", attempt+1, r);
+            HAL_Delay(1000);
+            IWDG->KR = 0xAAAA;
+        }
+        if (!simReady) {
+            DBG.error("A7670C: SIM не ответила за 10 с");
+            return GsmStatus::NoSim;
+        }
     }
 
     // Регистрация: CREG (GSM) + CEREG (LTE), ждём до 60 сек
