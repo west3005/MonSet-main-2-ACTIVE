@@ -144,9 +144,11 @@ void RuntimeConfig::setDefaultsFromConfig() {
         p0.parity              = Config::PORT0_DEFAULT_PARITY;
         p0.response_timeout_ms = Config::MODBUS_TIMEOUT_MS;
         p0.inter_frame_ms      = 10;
+#ifdef MODBUS_RTU_PORT_EXT
         p0.interface           = UartInterface::RS485;
         p0.avg_count           = Config::PORT0_DEFAULT_AVG;
         copyStr(p0.backup_filename, sizeof(p0.backup_filename), Config::PORT0_BACKUP_FILE);
+#endif
 
         // Один датчик по умолчанию — наследует legacy modbus_* значения
         p0.device_count        = 1;
@@ -175,9 +177,11 @@ void RuntimeConfig::setDefaultsFromConfig() {
         p1.parity              = Config::PORT1_DEFAULT_PARITY;
         p1.response_timeout_ms = 500;
         p1.inter_frame_ms      = 10;
+#ifdef MODBUS_RTU_PORT_EXT
         p1.interface           = UartInterface::RS485;
         p1.avg_count           = Config::PORT1_DEFAULT_AVG;
         copyStr(p1.backup_filename, sizeof(p1.backup_filename), Config::PORT1_BACKUP_FILE);
+#endif
         p1.device_count        = 0;
     }
 
@@ -192,9 +196,11 @@ void RuntimeConfig::setDefaultsFromConfig() {
         p2.parity              = Config::PORT2_DEFAULT_PARITY;
         p2.response_timeout_ms = 500;
         p2.inter_frame_ms      = 10;
+#ifdef MODBUS_RTU_PORT_EXT
         p2.interface           = UartInterface::RS485;
         p2.avg_count           = Config::PORT2_DEFAULT_AVG;
         copyStr(p2.backup_filename, sizeof(p2.backup_filename), Config::PORT2_BACKUP_FILE);
+#endif
         p2.device_count        = 0;
     }
 }
@@ -501,6 +507,7 @@ static void parseRtuPortInner(const char* obj, ModbusRtuPortConfig& rp) {
         else if (std::strcmp(parStr,"Even")==0 || std::strcmp(parStr,"even")==0) rp.parity = 1;
         else if (std::strcmp(parStr,"Odd") ==0 || std::strcmp(parStr,"odd") ==0) rp.parity = 2;
     }
+#ifdef MODBUS_RTU_PORT_EXT
     // interface: "RS485" (0) / "RS232" (1)
     { char ifStr[8]{};
       if (jsonGetString(obj, "if", ifStr, sizeof(ifStr)))
@@ -512,6 +519,7 @@ static void parseRtuPortInner(const char* obj, ModbusRtuPortConfig& rp) {
           rp.avg_count = v; }
     // backup filename
     jsonGetString(obj, "bak", rp.backup_filename, sizeof(rp.backup_filename));
+#endif
     // parse devs[] array inline
     const char* devsKey = "\"devs\"";
     const char* dp = std::strstr(obj, devsKey);
@@ -1170,15 +1178,19 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
         const char* parStr = (rp.parity==1)?"Even":(rp.parity==2)?"Odd":"None";
         n += std::snprintf(json+n,sizeof(json)-n,
             "%s{\"en\":%s,\"baud\":%lu,\"sb\":%u,\"par\":\"%s\","
+#ifdef MODBUS_RTU_PORT_EXT
             "\"if\":\"%s\",\"avg\":%u,\"bak\":\"%s\","
+#endif
             "\"rms\":%u,\"fms\":%u,\"devs\":[",
             i==0?"":",",
             rp.enabled?"true":"false",
             (unsigned long)rp.baudrate,
             (unsigned)rp.stop_bits, parStr,
+#ifdef MODBUS_RTU_PORT_EXT
             (rp.interface == UartInterface::RS232) ? "RS232" : "RS485",
             (unsigned)rp.avg_count,
             rp.backup_filename,
+#endif
             (unsigned)rp.response_timeout_ms,
             (unsigned)rp.inter_frame_ms);
         if (n<0||n>=(int)sizeof(json)) goto overflow;
