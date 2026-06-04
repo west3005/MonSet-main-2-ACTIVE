@@ -36,7 +36,7 @@ extern "C" {
     extern I2C_HandleTypeDef  hi2c1;
     extern UART_HandleTypeDef huart2;
     extern UART_HandleTypeDef huart3;
-// huart4 и huart5 объявлены в main.h, определены в uart_extra.c
+// huart4 объявлен в main.h; определяется CubeMX в main.c (PA0 TX / PA1 RX)
     extern UART_HandleTypeDef huart6;
     extern SPI_HandleTypeDef  hspi1;
     extern RTC_HandleTypeDef  hrtc;
