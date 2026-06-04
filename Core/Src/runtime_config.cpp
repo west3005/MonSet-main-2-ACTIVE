@@ -501,6 +501,17 @@ static void parseRtuPortInner(const char* obj, ModbusRtuPortConfig& rp) {
         else if (std::strcmp(parStr,"Even")==0 || std::strcmp(parStr,"even")==0) rp.parity = 1;
         else if (std::strcmp(parStr,"Odd") ==0 || std::strcmp(parStr,"odd") ==0) rp.parity = 2;
     }
+    // interface: "RS485" (0) / "RS232" (1)
+    { char ifStr[8]{};
+      if (jsonGetString(obj, "if", ifStr, sizeof(ifStr)))
+          rp.interface = (std::strcmp(ifStr,"RS232")==0) ? UartInterface::RS232
+                                                         : UartInterface::RS485; }
+    // avg_count per-port (1..100)
+    { uint8_t v = 0;
+      if (jsonGetU8(obj, "avg", v) && v > 0 && v <= 100)
+          rp.avg_count = v; }
+    // backup filename
+    jsonGetString(obj, "bak", rp.backup_filename, sizeof(rp.backup_filename));
     // parse devs[] array inline
     const char* devsKey = "\"devs\"";
     const char* dp = std::strstr(obj, devsKey);
@@ -1159,11 +1170,15 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
         const char* parStr = (rp.parity==1)?"Even":(rp.parity==2)?"Odd":"None";
         n += std::snprintf(json+n,sizeof(json)-n,
             "%s{\"en\":%s,\"baud\":%lu,\"sb\":%u,\"par\":\"%s\","
+            "\"if\":\"%s\",\"avg\":%u,\"bak\":\"%s\","
             "\"rms\":%u,\"fms\":%u,\"devs\":[",
             i==0?"":",",
             rp.enabled?"true":"false",
             (unsigned long)rp.baudrate,
             (unsigned)rp.stop_bits, parStr,
+            (rp.interface == UartInterface::RS232) ? "RS232" : "RS485",
+            (unsigned)rp.avg_count,
+            rp.backup_filename,
             (unsigned)rp.response_timeout_ms,
             (unsigned)rp.inter_frame_ms);
         if (n<0||n>=(int)sizeof(json)) goto overflow;
