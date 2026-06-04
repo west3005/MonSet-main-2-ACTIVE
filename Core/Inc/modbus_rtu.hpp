@@ -41,16 +41,26 @@ public:
      * @brief  Назначить UART и пин DE/RE после дефолтной конструкции.
      *         Вызывать перед init() для портов 1 и 2.
      * @param  uart   — UART handle (например &huart4)
-     * @param  dePort — GPIO порт пина DE/RE
-     * @param  dePin  — номер пина DE/RE
+     * @param  dePort — GPIO порт пина DE/RE (nullptr = auto-direction конвертер, DE не нужен)
+     * @param  dePin  — номер пина DE/RE (0 если dePort=nullptr)
      */
     void configure(UART_HandleTypeDef* uart,
                    GPIO_TypeDef* dePort, uint16_t dePin);
 
+    /**
+     * @brief  Перегрузка для конвертеров без DE (auto-direction, например 2126).
+     *         setTransmit()/setReceive() будут пропущены — направление управляется аппаратно.
+     * @param  uart — UART handle
+     */
+    void configure(UART_HandleTypeDef* uart);
+
     /** @brief Возвращает true если UART назначен через конструктор или configure(). */
     bool isConfigured() const { return m_uart != nullptr; }
 
-    /** Инициализация (DE/RE в режим приёма). Вызывать после configure(). */
+    /**
+     * @brief  Инициализация. Если dePort=nullptr — DE не управляется (auto-direction).
+     *         Вызывать после configure().
+     */
     void init();
 
     /**
