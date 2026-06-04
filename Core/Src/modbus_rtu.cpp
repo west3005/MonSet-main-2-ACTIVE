@@ -23,13 +23,21 @@ void ModbusRTU::configure(UART_HandleTypeDef* uart,
     m_dePin  = dePin;
 }
 
+/* ========= configure(uart) — для auto-direction конвертеров без DE (напр. 2126) ========= */
+void ModbusRTU::configure(UART_HandleTypeDef* uart)
+{
+    m_uart   = uart;
+    m_dePort = nullptr;   // DE не управляется — конвертер сам переключает направление
+    m_dePin  = 0;
+}
+
 /* ========= DE/RE управление ========= */
 void ModbusRTU::setTransmit() {
-    HAL_GPIO_WritePin(m_dePort, m_dePin, GPIO_PIN_SET);
+    if (m_dePort) HAL_GPIO_WritePin(m_dePort, m_dePin, GPIO_PIN_SET);
 }
 
 void ModbusRTU::setReceive() {
-    HAL_GPIO_WritePin(m_dePort, m_dePin, GPIO_PIN_RESET);
+    if (m_dePort) HAL_GPIO_WritePin(m_dePort, m_dePin, GPIO_PIN_RESET);
 }
 
 /* ========= CRC16 ========= */
@@ -49,12 +57,13 @@ uint16_t ModbusRTU::crc16(const uint8_t* data, uint16_t len)
 /* ========= Init ========= */
 void ModbusRTU::init()
 {
-    if (!m_uart || !m_dePort) {
-        DBG.error("ModbusRTU::init() — порт не сконфигурирован (nullptr), пропуск");
+    if (!m_uart) {
+        DBG.error("ModbusRTU::init() — UART не назначен, пропуск");
         return;
     }
-    setReceive();
-    DBG.info("ModbusRTU: инициализирован uart=0x%p", static_cast<void*>(m_uart));
+    setReceive();   // no-op если dePort=nullptr (auto-direction конвертер)
+    DBG.info("ModbusRTU: инициализирован uart=0x%p de=%s",
+             static_cast<void*>(m_uart), m_dePort ? "GPIO" : "auto");
 }
 
 /* ========= Чтение регистров ========= */
@@ -62,8 +71,8 @@ ModbusStatus ModbusRTU::readRegisters(uint8_t slave, uint8_t fc,
                                        uint16_t start, uint16_t count,
                                        uint16_t* outRegs, uint32_t timeout)
 {
-    if (!m_uart || !m_dePort) {
-        DBG.error("ModbusRTU::readRegisters() — порт не сконфигурирован, slave=%d", slave);
+    if (!m_uart) {
+        DBG.error("ModbusRTU::readRegisters() — UART не назначен, slave=%d", slave);
         return ModbusStatus::Timeout;
     }
 
