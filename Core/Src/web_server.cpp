@@ -4299,14 +4299,19 @@ void WebServer::handleApiConfig(uint8_t sn){
         const ModbusRtuPortConfig& rp = c.rtu_ports[i];
         const char* parStr = (rp.parity == 1) ? "Even" :
                              (rp.parity == 2) ? "Odd"  : "None";
+        const char* ifStr  = (rp.interface == UartInterface::RS232) ? "RS232" : "RS485";
         n += std::snprintf(m_respBuf+n, RESP_BUF_SIZE-n,
             "%s{\"en\":%s,\"baud\":%lu,\"sb\":%u,\"par\":\"%s\","
+            "\"if\":\"%s\",\"avg\":%u,\"bak\":\"%s\","
             "\"rms\":%u,\"fms\":%u,\"devs\":[",
             i==0?"":",",
             rp.enabled?"true":"false",
             (unsigned long)rp.baudrate,
             (unsigned)rp.stop_bits,
             parStr,
+            ifStr,
+            (unsigned)rp.avg_count,
+            rp.backup_filename,
             (unsigned)rp.response_timeout_ms,
             (unsigned)rp.inter_frame_ms
         );
