@@ -1,5 +1,13 @@
 #include "main.h"
 
+/* ── Датчиковые порты 1 и 2: хэндлы UART4 / UART5 ────────────────────────────
+ * huart3 (порт 0) определяется локальным main.c (CubeMX).
+ * huart4/huart5 не включены в .ioc — определяем здесь, в файле репо.
+ * extern-объявления находятся в Core/Inc/main.h.
+ * --------------------------------------------------------------------------- */
+UART_HandleTypeDef huart4;  ///< Датчиковый порт 1 — UART4 (PC10 TX / PC11 RX)
+UART_HandleTypeDef huart5;  ///< Датчиковый порт 2 — UART5 (PC12 TX / PD2  RX)
+
 /* ========= Global MSP ========= */
 void HAL_MspInit(void)
 {
