@@ -99,7 +99,8 @@ static inline void avgClearAll() {
 extern volatile bool g_web_exclusive;
 
 static W5500Net eth;
-static UART_HandleTypeDef huart5;
+static UART_HandleTypeDef huart4;  ///< Датчиковый порт 1 — UART4
+static UART_HandleTypeDef huart5;  ///< Датчиковый порт 2 / Iridium — UART5
 
 /**
  * @brief Инициализация UART4 (PC10 TX / PC11 RX) — датчик порт 1.
