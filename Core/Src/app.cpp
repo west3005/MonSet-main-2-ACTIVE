@@ -36,8 +36,7 @@ extern "C" {
     extern I2C_HandleTypeDef  hi2c1;
     extern UART_HandleTypeDef huart2;
     extern UART_HandleTypeDef huart3;
-extern UART_HandleTypeDef huart4;  ///< UART4 — датчиковый порт 1 (определён в uart_extra.c)
-    extern UART_HandleTypeDef huart5;  ///< UART5 — датчиковый порт 2 (определён в uart_extra.c)
+// huart4 и huart5 объявлены в main.h, определены в uart_extra.c
     extern UART_HandleTypeDef huart6;
     extern SPI_HandleTypeDef  hspi1;
     extern RTC_HandleTypeDef  hrtc;
