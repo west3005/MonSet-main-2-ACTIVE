@@ -544,20 +544,29 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
             std::snprintf(cmd, sizeof(cmd), "AT+CCHRECV=0,%d\r\n", recvLen);
             m_modem.flushRx_pub();
             m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-            // Читаем весь ответ до финального "OK\r\n"
-            // Формат: "+CCHRECV: DATA,0,N\r\n<N байт>\r\nOK\r\n"
-            m_modem.waitFor_pub(rx, (uint16_t)(sizeof(rx) - 1), "OK\r\n", 5000);
-            DBG.info("TLS CCH: raw recv [%.80s]", rx);
-            // Ищем HTTP/1. в любом месте буфера
-            const char* hstart = std::strstr(rx, "HTTP/1.");
-            if (hstart) {
-                int hl = (int)std::strlen(hstart);
-                std::memmove(rx, hstart, (size_t)hl + 1);
-                used = hl;
-            } else {
-                // HTTP не найден — сохраняем всё что есть для диагностики
-                used = (int)std::strlen(rx);
+            // Ответ: "\r\nOK\r\n+CCHRECV: DATA,0,N\r\n<данные>\r\nOK\r\n"
+            // Шаг 1: ждём начало URC "+CCHRECV: DATA," (пропускаем "\r\nOK\r\n")
+            {
+                char skip[64] = {};
+                m_modem.waitFor_pub(skip, sizeof(skip)-1, "+CCHRECV: DATA,", 3000);
             }
+            // Шаг 2: пропускаем остаток строки URC до \r\n
+            {
+                char skip2[32] = {};
+                m_modem.waitFor_pub(skip2, sizeof(skip2)-1, "\r\n", 500);
+            }
+            // Шаг 3: читаем данные (recvLen байт + немного запаса)
+            uint16_t toRead = (recvLen < (int)(sizeof(rx)-1)) ?
+                              (uint16_t)recvLen : (uint16_t)(sizeof(rx)-1);
+            m_modem.waitFor_pub(rx, toRead, "\r\nOK", 5000);
+            rx[toRead] = '\0';
+            // Убираем финальный "\r\nOK" если попал в буфер
+            {
+                char* tail = std::strstr(rx, "\r\nOK");
+                if (tail) *tail = '\0';
+            }
+            DBG.info("TLS CCH: raw recv [%.80s]", rx);
+            used = (int)std::strlen(rx);
             DBG.info("TLS CCH: CCHRECV data [%.60s]", rx);
         }
     }
