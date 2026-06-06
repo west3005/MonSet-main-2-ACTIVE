@@ -261,14 +261,24 @@ int A7670CTls::connect(const char* host, uint16_t port)
     DBG.info("TLS: DNS resolving %s...", host);
     // Формат A7670C: +CDNSGIP: 1,<count>,"host","ip1","ip2",...
     // Успех = "+CDNSGIP: 1", ошибка = "+CDNSGIP: 0,<errcode>"
-    uint16_t dnsRxLen = m_modem.waitFor_pub(r, sizeof(r), "+CDNSGIP:", 10000);
+    // A7670C: сначала "OK\r\n" на команду, затем асинхронный URC "+CDNSGIP:..."
+    // waitFor_pub останавливается на 50мс паузе между ними и теряет IP.
+    // Правильная последовательность: ждём OK → затем waitForUrc для URC.
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    uint16_t dnsRxLen = m_modem.waitForUrc_pub(r, sizeof(r), "+CDNSGIP:", 10000);
     (void)dnsRxLen;
+    DBG.info("TLS: DNS raw [%.60s]", r);
     if (std::strstr(r, "+CDNSGIP: 1")) {
-        // Пропускаем три запятые: "1,<count>,"host","ip"
+        // Формат A7670C: +CDNSGIP: 1,"host","ip1"[,"ip2"...]
+        // Берём последнее вхождение ,"IP" — надёжнее счёта запятых
         const char* p1 = std::strstr(r, "+CDNSGIP: 1");
-        const char* c1 = std::strchr(p1, ',');           // после "1"
-        if (c1) c1 = std::strchr(c1 + 1, ',');          // после count
-        if (c1) c1 = std::strchr(c1 + 1, ',');          // после "host"
+        const char* c1 = p1 ? std::strchr(p1, ',') : nullptr;
+        if (c1) {
+            const char* tmp = c1;
+            const char* last = nullptr;
+            while ((tmp = std::strstr(tmp, ",\""))) { last = tmp; tmp++; }
+            c1 = last;
+        }
         if (c1) {
             c1++;
             while (*c1 == ' ' || *c1 == '"') c1++;
@@ -285,7 +295,13 @@ int A7670CTls::connect(const char* host, uint16_t port)
         else
             DBG.warn("TLS: DNS parse fail, using hostname");
     } else {
-        DBG.warn("TLS: DNS fail [%.40s], using hostname", r);
+        DBG.error("TLS: DNS fail [%.60s]", r);
+        // A7670C не принимает hostname в CIPOPEN — без IP подключение невозможно
+        return -3;
+    }
+    if (!connectAddr[0] || std::strcmp(connectAddr, host) == 0) {
+        DBG.error("TLS: DNS не вернул IP для %s", host);
+        return -3;
     }
 
     // AT+CIPOPEN=<id>,"TCP","<ip_or_host>",<port>
