@@ -5076,6 +5076,16 @@ void WebServer::tick(){
                         (HAL_GetTick()-t0)<5000){ IWDG->KR=0xAAAA; HAL_Delay(2); }
                 }
                 disconnect(HTTP_SOCKET);
+                // Immediately reopen socket — do not wait for next tick().
+                // Without this the socket stays in FIN_WAIT/TIME_WAIT until
+                // the next tick() call (up to 5 ms later), which causes
+                // ERR_CONNECTION_REFUSED when the browser navigates between
+                // pages and fires a new request before the socket is LISTEN.
+                { uint32_t _tw=HAL_GetTick();
+                  while(getSn_SR(HTTP_SOCKET)!=SOCK_CLOSED &&
+                        (HAL_GetTick()-_tw)<200){ IWDG->KR=0xAAAA; HAL_Delay(1); }
+                  close(HTTP_SOCKET);
+                  if(socket(HTTP_SOCKET,Sn_MR_TCP,HTTP_PORT,0)==HTTP_SOCKET) listen(HTTP_SOCKET); }
             }
             break;
         }
