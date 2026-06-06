@@ -4547,7 +4547,11 @@ void WebServer::handleApiChannels(uint8_t sn){
         cfg.channels.wifi_enabled    || cfg.wifi_enabled,
         cfg.channels.iridium_enabled || cfg.iridium_enabled
     };
-    const uint8_t (&co)[4] = cfg.chain_order;
+
+    // Используем channels.chain_order (новое поле из UI), fallback на legacy
+    const uint8_t* co = (cfg.channels.chain_count > 0)
+                        ? cfg.channels.chain_order
+                        : cfg.chain_order;
 
     // Статус каждого канала (биты: 0=ETH,1=GSM,2=WiFi,3=Iridium)
     const char* status[4];
@@ -4556,9 +4560,9 @@ void WebServer::handleApiChannels(uint8_t sn){
     status[2] = en[2] ? ((st&0x04)?"ACTIVE":"STANDBY") : "DISABLED";
     status[3] = en[3] ? ((st&0x08)?"ACTIVE":"STANDBY") : "DISABLED";
 
-    // Приоритет каждого канала — позиция в chain_order (1-based), "—" если disabled
-    char prio[4][4]; // "1".."4" или "—"
-    for(int i=0;i<4;i++) std::strncpy(prio[i],"—",sizeof(prio[i])-1);
+    // Приоритет: позиция в chain_order (1-based), "-" если disabled
+    char prio[4][3];
+    for(int i=0;i<4;i++) std::strncpy(prio[i],"-",sizeof(prio[i])-1);
     for(int pos=0;pos<4;pos++){
         int ci=(int)co[pos];
         if(ci>=0&&ci<4&&en[ci]){
@@ -4566,22 +4570,25 @@ void WebServer::handleApiChannels(uint8_t sn){
         }
     }
 
-    // Имена каналов в порядке chain_order
     const char* chNames[4]={"Ethernet W5500","GSM Air780E","WiFi ESP8266","Iridium SBD"};
 
-    char buf[896]; int len=0;
-    len += std::snprintf(buf+len,sizeof(buf)-len,"{\"channels\":[");
+    // Инициализируем буфер нулями, чтобы не было мусора
+    char buf[640]{};
+    int len=0;
+    len += std::snprintf(buf+len,(int)sizeof(buf)-len,"{\"channels\":[");
     for(int pos=0;pos<4;pos++){
         int ci=(int)co[pos];
         if(ci<0||ci>3) ci=pos;
-        len += std::snprintf(buf+len,sizeof(buf)-len,
-            "%s{\"name\":\"%s\",\"status\":\"%s\",\"label\":\"%s\",\"priority\":\"%s\"}",
+        len += std::snprintf(buf+len,(int)sizeof(buf)-len,
+            "%s{\"name\":\"%s\",\"status\":\"%s\",\"priority\":\"%s\"}",
             pos>0?",":"",
-            chNames[ci], status[ci], status[ci], prio[ci]);
+            chNames[ci], status[ci], prio[ci]);
     }
-    len += std::snprintf(buf+len,sizeof(buf)-len,
+    len += std::snprintf(buf+len,(int)sizeof(buf)-len,
         "],\"eth\":\"%s\",\"gsm\":\"%s\",\"wifi\":\"%s\",\"iridium\":\"%s\"}",
         status[0],status[1],status[2],status[3]);
+    if(len>=(int)sizeof(buf)) len=(int)sizeof(buf)-1;
+    buf[len]='\0';
     sendResponse(sn,200,"application/json",buf,(uint16_t)len);
 }
 
