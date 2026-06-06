@@ -402,14 +402,48 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
         return -1;
     }
 
-    int rc = connect(u.host, u.port);
-    if (rc != 0) {
-        DBG.error("TLS: connect failed rc=%d", rc);
+    char cmd[256], r[256];
+
+    // --- Запускаем SSL сервис ---
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CCHSTART\r\n", 14);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 5000);
+    // +CCHSTART: 0 = уже запущен, тоже OK
+    if (!std::strstr(r, "OK") && !std::strstr(r, "+CCHSTART: 0")) {
+        DBG.error("TLS: CCHSTART fail [%.40s]", r);
         return -2;
     }
+    DBG.info("TLS CCH: CCHSTART OK");
 
-    // HTTP-заголовок
-    char hdr[700];
+    // --- Открываем SSL соединение ---
+    // AT+CCHOPEN=<session>,<host>,<port>,<ssl_type>
+    // ssl_type=0: не проверяем сертификат (VERIFY_NONE)
+    m_modem.flushRx_pub();
+    std::snprintf(cmd, sizeof(cmd), "AT+CCHOPEN=0,\"%s\",%u,0\r\n", u.host, (unsigned)u.port);
+    m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
+    DBG.info("TLS CCH: CCHOPEN %s:%u ...", u.host, (unsigned)u.port);
+    // Ответ: +CCHOPEN: 0,0 (успех) или +CCHOPEN: 0,<err>
+    m_modem.waitForUrc_pub(r, sizeof(r), "+CCHOPEN:", 30000);
+    {
+        uint16_t already = (uint16_t)std::strlen(r);
+        if (already < sizeof(r) - 1)
+            m_modem.waitFor_pub(r + already, (uint16_t)(sizeof(r) - already - 1), "\r\n", 1000);
+    }
+    DBG.info("TLS CCH: CCHOPEN raw [%.60s]", r);
+    int sess = -1, cerr = -1;
+    const char* cp = std::strstr(r, "+CCHOPEN:");
+    if (cp) std::sscanf(cp, "+CCHOPEN: %d,%d", &sess, &cerr);
+    if (cerr != 0) {
+        DBG.error("TLS CCH: CCHOPEN err=%d", cerr);
+        m_modem.flushRx_pub();
+        m_modem.sendRaw_pub("AT+CCHSTOP\r\n", 13);
+        m_modem.waitFor_pub(r, sizeof(r), "OK", 3000);
+        return -3;
+    }
+    DBG.info("TLS CCH: SSL open OK");
+
+    // --- Формируем HTTP запрос ---
+    char hdr[512];
     int hdrLen;
     const char* auth = Cfg().server_auth_b64;
     if (auth && auth[0]) {
@@ -432,69 +466,103 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
             "\r\n",
             u.path, u.host, (unsigned)jsonLen);
     }
+    uint16_t totalLen = (uint16_t)hdrLen + jsonLen;
 
-    if (hdrLen <= 0 || (size_t)hdrLen >= sizeof(hdr)) {
-        DBG.error("TLS HTTP: header overflow");
-        close(); return -50;
+    // --- Отправляем через AT+CCHSEND ---
+    // AT+CCHSEND=<session>,<len> → prompt ">" → данные → +CCHSEND: 0,0
+    m_modem.flushRx_pub();
+    std::snprintf(cmd, sizeof(cmd), "AT+CCHSEND=0,%u\r\n", (unsigned)totalLen);
+    m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
+    DBG.info("TLS CCH: CCHSEND %u bytes...", (unsigned)totalLen);
+
+    m_modem.waitForUrc_pub(r, sizeof(r), ">", 5000);
+    if (!std::strstr(r, ">")) {
+        DBG.error("TLS CCH: no CCHSEND prompt raw=[%.40s]", r);
+        cchClose();
+        return -4;
     }
 
-    // Отправляем заголовок + тело через mbedTLS
-    int w;
-    size_t off = 0;
-    const uint8_t* hdrBuf = reinterpret_cast<const uint8_t*>(hdr);
-    while (off < (size_t)hdrLen) {
-        w = mbedtls_ssl_write(&m_ssl, hdrBuf + off, (size_t)hdrLen - off);
-        if (w > 0) { off += (size_t)w; continue; }
-        if (w == MBEDTLS_ERR_SSL_WANT_READ || w == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            HAL_Delay(2); IWDG->KR = 0xAAAA; continue;
-        }
-        logMbedtlsErr("TLS HTTP: write header", w);
-        close(); return -51;
+    // Отправляем заголовок и тело одним потоком
+    m_modem.sendRaw_pub(hdr, (uint16_t)hdrLen);
+    m_modem.sendRaw_pub(json, jsonLen);
+
+    // Ждём подтверждение отправки: +CCHSEND: 0,0
+    m_modem.waitForUrc_pub(r, sizeof(r), "+CCHSEND:", 10000);
+    {
+        uint16_t already = (uint16_t)std::strlen(r);
+        if (already < sizeof(r) - 1)
+            m_modem.waitFor_pub(r + already, (uint16_t)(sizeof(r) - already - 1), "\r\n", 500);
+    }
+    DBG.info("TLS CCH: CCHSEND ack [%.40s]", r);
+    int sack = -1;
+    const char* sp = std::strstr(r, "+CCHSEND:");
+    if (sp) { int tmp; std::sscanf(sp, "+CCHSEND: %d,%d", &tmp, &sack); }
+    if (sack != 0) {
+        DBG.warn("TLS CCH: CCHSEND ack err=%d (продолжаем читать ответ)", sack);
     }
 
-    off = 0;
-    const uint8_t* jsonBuf = reinterpret_cast<const uint8_t*>(json);
-    while (off < (size_t)jsonLen) {
-        w = mbedtls_ssl_write(&m_ssl, jsonBuf + off, (size_t)jsonLen - off);
-        if (w > 0) { off += (size_t)w; continue; }
-        if (w == MBEDTLS_ERR_SSL_WANT_READ || w == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            HAL_Delay(2); IWDG->KR = 0xAAAA; continue;
-        }
-        logMbedtlsErr("TLS HTTP: write body", w);
-        close(); return -52;
-    }
-
-    // Читаем HTTP-ответ
+    // --- Читаем HTTP ответ ---
+    // A7670C уведомляет: +CCHRECV: DATA,0,<len>
     static char rx[1024];
     int used = 0, httpCode = -1;
     const uint32_t t0 = HAL_GetTick();
 
-    while ((HAL_GetTick() - t0) < m_timeoutMs) {
-        int r = mbedtls_ssl_read(&m_ssl,
-                                  reinterpret_cast<unsigned char*>(rx + used),
-                                  (size_t)(sizeof(rx) - 1 - used));
-        if (r > 0) {
-            used += r;
-            rx[used] = '\0';
-            const char* p = std::strstr(rx, "HTTP/1.");
-            if (p) {
-                int code = 0;
-                if (std::sscanf(p, "HTTP/%*s %d", &code) == 1) {
-                    httpCode = code;
-                    DBG.info("TLS HTTP: code=%d", httpCode);
-                    break;
-                }
-            }
-            continue;
+    while ((HAL_GetTick() - t0) < 15000 && used < (int)sizeof(rx) - 1) {
+        // Ждём URC +CCHRECV: DATA,0,<len>
+        char urc[128] = {};
+        m_modem.waitForUrc_pub(urc, sizeof(urc), "+CCHRECV:", 3000);
+        if (!std::strstr(urc, "+CCHRECV:")) break;  // таймаут — данных нет
+
+        int recvLen = 0;
+        const char* rp = std::strstr(urc, "DATA,");
+        if (rp) std::sscanf(rp, "DATA,%*d,%d", &recvLen);
+        if (recvLen <= 0) break;
+
+        // AT+CCHRECV=<session>,<len>
+        std::snprintf(cmd, sizeof(cmd), "AT+CCHRECV=0,%d\r\n", recvLen);
+        m_modem.flushRx_pub();
+        m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
+
+        // Читаем: +CCHRECV: DATA,0,<actual>\r\n<data>
+        char* dst = rx + used;
+        uint16_t avail = (uint16_t)(sizeof(rx) - 1 - used);
+        m_modem.waitFor_pub(dst, avail, "\r\n\r\n", 3000);
+        // Пропускаем заголовок +CCHRECV: до данных
+        const char* dataStart = std::strstr(dst, "\r\n");
+        if (dataStart) {
+            dataStart += 2;
+            int dataLen = (int)std::strlen(dataStart);
+            std::memmove(dst, dataStart, (size_t)dataLen + 1);
+            used += dataLen;
+        } else {
+            used += (int)std::strlen(dst);
         }
-        if (r == 0) break;
-        if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            HAL_Delay(5); IWDG->KR = 0xAAAA; continue;
-        }
-        logMbedtlsErr("TLS HTTP: read response", r);
-        break;
+        rx[used] = '\0';
+        if (std::strstr(rx, "HTTP/1.")) break;  // получили статус
+        IWDG->KR = 0xAAAA;
     }
 
-    close();
+    // Парсим HTTP код
+    const char* p = std::strstr(rx, "HTTP/1.");
+    if (p) {
+        std::sscanf(p, "HTTP/1.%*d %d", &httpCode);
+        DBG.info("TLS CCH: HTTP %d", httpCode);
+    } else {
+        DBG.error("TLS CCH: нет HTTP ответа [%.60s]", rx);
+    }
+
+    cchClose();
     return httpCode;
+}
+
+void A7670CTls::cchClose()
+{
+    char r[64];
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CCHCLOSE=0\r\n", 16);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 3000);
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CCHSTOP\r\n", 13);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 3000);
+    DBG.info("TLS CCH: closed");
 }
