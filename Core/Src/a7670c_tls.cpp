@@ -34,7 +34,7 @@ extern "C" {
 // ============================================================================
 // Константы
 // ============================================================================
-static constexpr uint16_t MODEM_MAX_SEND = 512;
+static constexpr uint16_t MODEM_MAX_SEND = 256;  // A7670C: >256 иногда ERROR
 static constexpr uint16_t MODEM_MAX_RECV = 512;
 static constexpr uint8_t  CIP_LINK       = 0;    ///< A7670C: первый доступный link
 
@@ -301,6 +301,7 @@ int A7670CTls::connect(const char* host, uint16_t port)
         std::memcpy(r, cipBuf, sizeof(r));
     }
     DBG.info("TLS: TCP open OK (link=%u)", (unsigned)m_sockId);
+    HAL_Delay(300);  // A7670C: пауза после CIPOPEN перед первым CIPSEND
 
     // ---- mbedTLS seed ----
     const char* pers = "a7670c_tls";
