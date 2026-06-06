@@ -125,13 +125,18 @@ void App::runTestSend() {
     }
 
     m_testState = TestSendState::Sending;
-    /* Определяем приоритетный канал по активной конфигурации */
+    /* Определяем приоритетный канал по chain_order из конфига */
     { const RuntimeConfig& _c = Cfg();
-      if      (_c.eth_enabled)     std::strncpy(m_testChannel, "eth",     sizeof(m_testChannel)-1);
-      else if (_c.gsm_enabled)     std::strncpy(m_testChannel, "gsm",     sizeof(m_testChannel)-1);
-      else if (_c.wifi_enabled)    std::strncpy(m_testChannel, "wifi",    sizeof(m_testChannel)-1);
-      else if (_c.iridium_enabled) std::strncpy(m_testChannel, "iridium", sizeof(m_testChannel)-1);
-      else                         std::strncpy(m_testChannel, "none",    sizeof(m_testChannel)-1);
+      const char* _chName[4] = {"eth", "gsm", "wifi", "iridium"};
+      bool _chEn[4] = {_c.eth_enabled, _c.gsm_enabled, _c.wifi_enabled, _c.iridium_enabled};
+      std::strncpy(m_testChannel, "none", sizeof(m_testChannel)-1);
+      for(int _i = 0; _i < 4; _i++){
+          int _ci = (int)_c.chain_order[_i];
+          if(_ci >= 0 && _ci < 4 && _chEn[_ci]){
+              std::strncpy(m_testChannel, _chName[_ci], sizeof(m_testChannel)-1);
+              break;
+          }
+      }
       m_testChannel[sizeof(m_testChannel)-1] = '\0'; }
 
     bool prevWebExclusive = g_web_exclusive;
