@@ -549,7 +549,9 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
             // выход по 50мс паузе после последнего байта или таймаут 6с.
             // Ответ содержит: "\r\nOK\r\n+CCHRECV: DATA,0,N\r\n<N байт>\r\nOK\r\n"
             m_modem.waitFor_pub(rx, (uint16_t)(sizeof(rx)-1), "\r\nOK\r\n", 6000);
-            DBG.info("TLS CCH: raw recv [%.100s]", rx);
+            DBG.info("TLS CCH: raw recv len=%d hex0=%02X%02X%02X%02X [%.200s]",
+                 (int)std::strlen(rx),
+                 (uint8_t)rx[0],(uint8_t)rx[1],(uint8_t)rx[2],(uint8_t)rx[3], rx);
             // Ищем HTTP/1. в любом месте буфера
             const char* hstart = std::strstr(rx, "HTTP/1.");
             if (hstart) {
