@@ -275,15 +275,16 @@ int A7670CTls::connect(const char* host, uint16_t port)
         char cipBuf[256] = {};
         m_modem.waitForUrc_pub(cipBuf, sizeof(cipBuf), "+CIPOPEN:", 18000);
 
+        DBG.info("TLS: CIPOPEN raw [%.80s]", cipBuf);
         if (!std::strstr(cipBuf, "+CIPOPEN:")) {
-            DBG.error("TLS: CIPOPEN no response [%.80s]", cipBuf);
+            DBG.error("TLS: CIPOPEN no URC, raw=[%.80s]", cipBuf);
             return -1;
         }
         int id = 0, err = -1;
         const char* p = std::strstr(cipBuf, "+CIPOPEN:");
         std::sscanf(p, "+CIPOPEN: %d,%d", &id, &err);
         if (err != 0) {
-            DBG.error("TLS: CIPOPEN err=%d addr=%s:%u", err, connectAddr, (unsigned)port);
+            DBG.error("TLS: CIPOPEN err=%d addr=%s:%u raw=[%.60s]", err, connectAddr, (unsigned)port, cipBuf);
             return -2;
         }
         std::memcpy(r, cipBuf, sizeof(r));
