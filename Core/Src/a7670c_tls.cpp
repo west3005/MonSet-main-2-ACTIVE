@@ -255,54 +255,9 @@ int A7670CTls::connect(const char* host, uint16_t port)
     std::strncpy(connectAddr, host, sizeof(connectAddr) - 1);
     connectAddr[sizeof(connectAddr) - 1] = '\0';
 
-    m_modem.flushRx_pub();
-    std::snprintf(cmd, sizeof(cmd), "AT+CDNSGIP=\"%s\"\r\n", host);
-    m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-    DBG.info("TLS: DNS resolving %s...", host);
-    // Формат A7670C: +CDNSGIP: 1,<count>,"host","ip1","ip2",...
-    // Успех = "+CDNSGIP: 1", ошибка = "+CDNSGIP: 0,<errcode>"
-    // A7670C: сначала "OK\r\n" на команду, затем асинхронный URC "+CDNSGIP:..."
-    // waitFor_pub останавливается на 50мс паузе между ними и теряет IP.
-    // Правильная последовательность: ждём OK → затем waitForUrc для URC.
-    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
-    uint16_t dnsRxLen = m_modem.waitForUrc_pub(r, sizeof(r), "+CDNSGIP:", 10000);
-    (void)dnsRxLen;
-    DBG.info("TLS: DNS raw [%.60s]", r);
-    if (std::strstr(r, "+CDNSGIP: 1")) {
-        // Формат A7670C: +CDNSGIP: 1,"host","ip1"[,"ip2"...]
-        // Берём последнее вхождение ,"IP" — надёжнее счёта запятых
-        const char* p1 = std::strstr(r, "+CDNSGIP: 1");
-        const char* c1 = p1 ? std::strchr(p1, ',') : nullptr;
-        if (c1) {
-            const char* tmp = c1;
-            const char* last = nullptr;
-            while ((tmp = std::strstr(tmp, ",\""))) { last = tmp; tmp++; }
-            c1 = last;
-        }
-        if (c1) {
-            c1++;
-            while (*c1 == ' ' || *c1 == '"') c1++;
-            size_t ipLen = 0;
-            while (c1[ipLen] && c1[ipLen] != '"' && c1[ipLen] != '\r' &&
-                   c1[ipLen] != '\n' && ipLen < sizeof(connectAddr) - 1) {
-                connectAddr[ipLen] = c1[ipLen];
-                ipLen++;
-            }
-            connectAddr[ipLen] = '\0';
-        }
-        if (connectAddr[0] && std::strcmp(connectAddr, host) != 0)
-            DBG.info("TLS: DNS OK %s -> %s", host, connectAddr);
-        else
-            DBG.warn("TLS: DNS parse fail, using hostname");
-    } else {
-        DBG.error("TLS: DNS fail [%.60s]", r);
-        // A7670C не принимает hostname в CIPOPEN — без IP подключение невозможно
-        return -3;
-    }
-    if (!connectAddr[0] || std::strcmp(connectAddr, host) == 0) {
-        DBG.error("TLS: DNS не вернул IP для %s", host);
-        return -3;
-    }
+    // AT+CDNSGIP не поддерживается данной прошивкой A7670C.
+    // Передаём hostname напрямую — A7670C резолвит его внутри стека при CIPOPEN.
+    DBG.info("TLS: skip DNS, use hostname %s", connectAddr);
 
     // AT+CIPOPEN=<id>,"TCP","<ip_or_host>",<port>
     // Модем сначала отвечает "OK", затем асинхронно "+CIPOPEN: <id>,<err>"
