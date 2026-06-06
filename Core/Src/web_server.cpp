@@ -83,16 +83,21 @@ WebServer::WebServer() {}
 
 
 // ── W5500 TX-safe send: wait for space then send ─────────────────────────────
-static void w5500_send(uint8_t sn, const uint8_t* buf, uint16_t len){
-    if(!len) return;
+static bool w5500_send(uint8_t sn, const uint8_t* buf, uint16_t len){
+    if(!len) return true;
     uint32_t t0 = HAL_GetTick();
-    // Wait until TX buffer has enough free space (max 2s per chunk)
+    // Wait until TX buffer has enough free space (max TX_FSR_TIMEOUT_MS)
     while(getSn_TX_FSR(sn) < len){
-        if((HAL_GetTick() - t0) > 2000) return; // timeout — abort
+        if((HAL_GetTick() - t0) > 3000U){ // TX_FSR_TIMEOUT_MS
+            DBG.warn("WebServer: TX_FSR timeout sn=%u len=%u fsr=%u",
+                (unsigned)sn,(unsigned)len,(unsigned)getSn_TX_FSR(sn));
+            return false;
+        }
         IWDG->KR = 0xAAAA;
-        HAL_Delay(1);
+        HAL_Delay(2);
     }
     send(sn, (uint8_t*)buf, len);
+    return true;
 }
 
 
@@ -171,7 +176,7 @@ void WebServer::sendResponse(uint8_t sn, int code, const char* ct,
         uint16_t chunk = bodyLen - offset;
         if (chunk > TX_CHUNK_SIZE) chunk = TX_CHUNK_SIZE;
         IWDG->KR = 0xAAAA;
-        w5500_send(sn, (uint8_t*)(body + offset), chunk);
+        if (!w5500_send(sn, (uint8_t*)(body + offset), chunk)) break; // TX timeout
         offset += chunk;
     }
 }
