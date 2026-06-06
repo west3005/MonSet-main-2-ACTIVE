@@ -84,6 +84,9 @@ public:
     /// @brief Get the number of active (enabled+alive) channels
     uint8_t activeCount() const;
 
+    /// @brief Get the channel that was actually used in last sendData()
+    Channel getLastSentChannel() const { return m_lastSentChannel; }
+
 private:
     ChannelState  m_states[4];
     ChannelSendFn m_sendFns[4] = {nullptr};
@@ -102,4 +105,7 @@ private:
 
     /// @brief Load channel enable flags from config
     void loadConfig();
+
+    /// Last channel that successfully sent data
+    Channel m_lastSentChannel = Channel::ETHERNET;
 };

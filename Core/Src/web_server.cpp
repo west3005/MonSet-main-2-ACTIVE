@@ -85,18 +85,36 @@ WebServer::WebServer() {}
 // ── W5500 TX-safe send: wait for space then send ─────────────────────────────
 static bool w5500_send(uint8_t sn, const uint8_t* buf, uint16_t len){
     if(!len) return true;
-    uint32_t t0 = HAL_GetTick();
-    // Wait until TX buffer has enough free space (max TX_FSR_TIMEOUT_MS)
-    while(getSn_TX_FSR(sn) < len){
-        if((HAL_GetTick() - t0) > 3000U){ // TX_FSR_TIMEOUT_MS
-            DBG.warn("WebServer: TX_FSR timeout sn=%u len=%u fsr=%u",
-                (unsigned)sn,(unsigned)len,(unsigned)getSn_TX_FSR(sn));
+    uint16_t sent = 0;
+    while(sent < len){
+        // Ждём хоть какого-то свободного места в TX FIFO
+        uint32_t t0 = HAL_GetTick();
+        uint16_t fsr = 0;
+        while((fsr = getSn_TX_FSR(sn)) == 0){
+            if((HAL_GetTick() - t0) > 3000U){
+                DBG.warn("WebServer: TX_FSR timeout sn=%u sent=%u/%u",
+                    (unsigned)sn,(unsigned)sent,(unsigned)len);
+                return false;
+            }
+            IWDG->KR = 0xAAAA;
+            HAL_Delay(2);
+        }
+        uint16_t now = len - sent;
+        if(now > fsr) now = fsr;
+        // send() может вернуть SOCK_BUSY если предыдущая команда не завершена
+        int32_t ret = send(sn, (uint8_t*)(buf + sent), now);
+        if(ret == (int32_t)SOCK_BUSY){
+            // Ждём завершения предыдущей TX команды и повторяем
+            IWDG->KR = 0xAAAA;
+            HAL_Delay(2);
+            continue; // не двигаем sent — повторяем тот же кусок
+        }
+        if(ret <= 0){
+            DBG.warn("WebServer: send() err=%d sn=%u", (int)ret, (unsigned)sn);
             return false;
         }
-        IWDG->KR = 0xAAAA;
-        HAL_Delay(2);
+        sent += (uint16_t)ret;
     }
-    send(sn, (uint8_t*)buf, len);
     return true;
 }
 
@@ -4048,45 +4066,176 @@ void WebServer::handleLogs(uint8_t sn){
 void WebServer::handleTestPage(uint8_t sn){
     if(serveFile(sn,"/test.html","text/html")) return;
     char* buf=m_respBuf; const int bsz=RESP_BUF_SIZE; int n=0;
-    writeHead(buf,n,bsz,"Test Send");
-    SNCAT("<h2>&#9654; Test Send</h2>");
-    writeNav(buf,n,bsz,"test");
+
+    // head + sidebar CSS
+    n += std::snprintf(buf+n, bsz-n,
+        "<!DOCTYPE html><html lang='ru'><head>"
+        "<meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Test &mdash; MonSet</title>"
+        "<style>%s"
+        "body{padding:0;display:flex;flex-direction:row;min-height:100dvh}"
+        ".sidebar{width:52px;min-width:52px;background:#161b22;"
+        "border-right:1px solid #30363d;display:flex;flex-direction:column;"
+        "align-items:center;padding:10px 0;gap:2px;position:sticky;top:0;"
+        "height:100dvh;flex-shrink:0}"
+        ".sidebar-logo{width:32px;height:32px;margin-bottom:12px;"
+        "display:flex;align-items:center;justify-content:center;color:#2dd4bf}"
+        ".sidebar a{width:38px;height:38px;border-radius:6px;"
+        "display:flex;align-items:center;justify-content:center;"
+        "color:#8b949e;text-decoration:none;"
+        "transition:color .15s,background .15s;position:relative}"
+        ".sidebar a:hover{color:#c9d1d9;background:#21262d}"
+        ".sidebar a.act{color:#0e1117;background:#2dd4bf}"
+        ".sidebar a::after{content:attr(title);position:absolute;left:48px;"
+        "background:#161b22;color:#c9d1d9;font-size:11px;padding:3px 8px;"
+        "border-radius:4px;border:1px solid #30363d;white-space:nowrap;"
+        "pointer-events:none;opacity:0;z-index:100;transition:opacity .15s}"
+        ".sidebar a.act::after{color:#2dd4bf;font-weight:600}"
+        ".sidebar a:hover::after{opacity:1}"
+        ".sidebar-spacer{flex:1}"
+        ".sidebar-ver{font-size:10px;color:#484f58;writing-mode:vertical-rl;"
+        "padding-bottom:6px;letter-spacing:.1em}"
+        ".wrap{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}"
+        ".page-title{font-size:16px;font-weight:700;color:#2dd4bf;padding:14px 16px 0;margin-bottom:12px}"
+        ".ch-row{display:flex;align-items:center;gap:8px;padding:7px 10px;"
+        "border-radius:6px;background:#0e1117;border:1px solid #30363d;"
+        "font-size:13px;margin-bottom:5px}"
+        ".ch-row.first{border-color:#2dd4bf55}"
+        ".ch-badge{font-size:10px;font-weight:700;padding:2px 7px;"
+        "border-radius:999px;background:#30363d;color:#8b949e;"
+        "min-width:26px;text-align:center}"
+        ".ch-row.first .ch-badge{background:rgba(45,212,191,.15);color:#2dd4bf}"
+        ".ch-name{flex:1;color:#c9d1d9;font-weight:600}"
+        ".ch-row.dis .ch-name{color:#484f58}"
+        ".ch-state{font-size:11px;color:#8b949e}"
+        ".ch-row.dis .ch-state{color:#30363d}"
+        "</style></head><body>",
+        CSS);
+
+    // sidebar
+    SNCAT("<aside class='sidebar'>"
+          "<div class='sidebar-logo'>"
+          "<svg width='26' height='26' viewBox='0 0 24 24' fill='none'>"
+          "<polygon points='12,2 15.5,8.5 22,9.5 17,14.5 18.5,21 12,17.5 5.5,21 7,14.5 2,9.5 8.5,8.5'"
+          " stroke='#2dd4bf' stroke-width='1.5' fill='rgba(45,212,191,0.1)'/></svg></div>"
+          "<a href='/' title='Dashboard'>"
+          "<svg width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='currentColor'"
+          " stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
+          "<path d='M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3"
+          "m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6'/></svg></a>"
+          "<a href='/config' title='Config'>"
+          "<svg width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='currentColor'"
+          " stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
+          "<path d='M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06"
+          "a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21"
+          "a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83"
+          "l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9"
+          "a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68"
+          "a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33"
+          "l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21"
+          "a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z'/></svg></a>"
+          "<a href='/test' class='act' title='Test'>"
+          "<svg width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='currentColor'"
+          " stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
+          "<polygon points='5,3 19,12 5,21'/></svg></a>"
+          "<a href='/logs' title='Logs'>"
+          "<svg width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='currentColor'"
+          " stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
+          "<path d='M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"
+          "M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12h6M9 16h4'/></svg></a>"
+          "<a href='/files' title='Files'>"
+          "<svg width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='currentColor'"
+          " stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
+          "<path d='M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z'/>"
+          "</svg></a>"
+          "<div class='sidebar-spacer'></div>"
+          "<span class='sidebar-ver'>v2</span>"
+          "</aside>");
+
+    // main wrap
+    SNCAT("<div class='wrap'><div style='padding:0 12px 40px'>");
+    SNCAT("<div class='page-title'>&#9654; Test Send</div>");
+
+    // Target URL card
     { char _effUrl[192]{}; Cfg().buildServerUrl(_effUrl, sizeof(_effUrl));
-    SNCAT("<div class='card'><h3>Target URL</h3>"
-          "<div style='font-size:12px;color:#8b949e;word-break:break-all'>%s</div></div>",
-          _effUrl); }
-    SNCAT("<div class='card'><h3>JSON Preview</h3>"
-          "<pre id='pv' style='font-size:11px;color:#8b949e;white-space:pre-wrap;word-break:break-all'>...</pre>"
-          "<button onclick='doCopy()' style='margin-top:6px;font-size:12px'>&#128203; Copy JSON</button></div>");
+      SNCAT("<div class='card'><div class='card-title'>Target URL</div>"
+            "<div style='font-size:12px;color:#8b949e;word-break:break-all'>%s</div></div>",
+            _effUrl); }
+
+    // Channel priority — from chain_order + enabled flags
+    {
+        const RuntimeConfig& c = Cfg();
+        const char* chName[4] = {"ETH","GSM","WiFi","Iridium"};
+        bool chEn[4] = {c.eth_enabled, c.gsm_enabled, c.wifi_enabled, c.iridium_enabled};
+        bool firstActive = false;
+        SNCAT("<div class='card'><div class='card-title'>Channel Priority</div>");
+        for(int i = 0; i < 4; i++){
+            int ci = (int)c.chain_order[i];
+            if(ci < 0 || ci > 3) ci = i;
+            bool en = chEn[ci];
+            bool isFirst = en && !firstActive;
+            if(isFirst) firstActive = true;
+            SNCAT("<div class='ch-row%s%s'>"
+                  "<span class='ch-badge'>%d</span>"
+                  "<span class='ch-name'>%s</span>"
+                  "<span class='ch-state'>%s</span>"
+                  "</div>",
+                  isFirst  ? " first" : "",
+                  !en      ? " dis"   : "",
+                  i + 1, chName[ci],
+                  isFirst ? "primary" : (en ? "fallback" : "disabled"));
+        }
+        SNCAT("</div>");
+    }
+
+    // JSON Preview card
+    SNCAT("<div class='card'><div class='card-title'>JSON Preview</div>"
+          "<pre id='pv' style='font-size:11px;color:#8b949e;white-space:pre-wrap;"
+          "word-break:break-all;max-height:180px;overflow:auto'>loading...</pre>"
+          "<button onclick='doCopy()' class='btn s'"
+          " style='margin-top:8px;font-size:12px'>&#128203; Copy JSON</button></div>");
+
+    // Send + result card
     SNCAT("<div class='card'>"
-          "<button onclick='doTest()' style='width:100%%'>&#9654; Send Test</button>"
+          "<button onclick='doTest()' class='btn' style='width:100%%'>&#9654; Send Test</button>"
           "<div id='res' style='margin-top:10px;font-size:13px'></div></div>");
+
+    // JS
     SNCAT("<script>"
           "var t;"
           "fetch('/api/test_payload').then(r=>r.text()).then(j=>{"
           "try{document.getElementById('pv').textContent=JSON.stringify(JSON.parse(j),null,2);}"
-          "catch(e){document.getElementById('pv').textContent=j;}}).catch(()=>{});"
-          "function doCopy(){var s=document.getElementById('pv').textContent;"
-          "navigator.clipboard&&navigator.clipboard.writeText(s).then(()=>alert('Copied!'));}"
+          "catch(e){document.getElementById('pv').textContent=j;}"
+          "}).catch(()=>{document.getElementById('pv').textContent='error loading payload';});"
+          "function doCopy(){"
+          "var s=document.getElementById('pv').textContent;"
+          "if(!navigator.clipboard){return;}"
+          "navigator.clipboard.writeText(s).then(()=>{"
+          "var b=event.target;b.textContent='Copied!';setTimeout(()=>b.textContent='\\u{1F4CB} Copy JSON',1500);});}"
           "function doTest(){"
           "if(t)clearInterval(t);"
           "var el=document.getElementById('res');"
-          "el.textContent='Sending...';el.className='';"
+          "el.innerHTML='<span style=\"color:#8b949e\">Sending\u2026</span>';"
           "fetch('/api/test_send',{method:'POST'})"
           ".then(()=>{t=setInterval(poll,1200);})"
-          ".catch(e=>{el.textContent='Error: '+e;el.className='err';});}"
+          ".catch(e=>{el.textContent='Network error: '+e;});}"
           "function poll(){"
           "fetch('/api/test_result').then(r=>r.json()).then(j=>{"
           "var el=document.getElementById('res');"
-          "if(j.status==='running'){el.textContent='Running via '+j.channel+'...';return;}"
+          "if(j.status==='running'){"
+          "el.innerHTML='<span style=\"color:#e3b341\">&#9654; '+j.channel+'...</span>';return;}"
           "if(j.status==='idle')return;"
           "clearInterval(t);"
           "var ok=j.http_code>=200&&j.http_code<300;"
           "el.className=ok?'ok':'err';"
-          "el.textContent=j.status+' | '+j.channel+' | HTTP '+j.http_code+' | '+j.elapsed_ms+'ms';"
-          "}).catch(()=>{});}"
-          "</script>"
-          "<footer>MonSet v1.0</footer></body></html>");
+          "el.innerHTML=(ok?'&#10003; ':'&#10007; ')+j.status"
+          "+' &nbsp;|&nbsp; '+j.channel"
+          "+' &nbsp;|&nbsp; HTTP '+j.http_code"
+          "+' &nbsp;|&nbsp; '+j.elapsed_ms+'ms';}).catch(()=>{});}"
+          "</script>");
+
+    SNCAT("</div></div></body></html>");
     if(n>=bsz) { n=bsz-1; } buf[n]='\0';
     sendResponse(sn,200,"text/html; charset=UTF-8",buf,(uint16_t)n);
 }
@@ -4392,27 +4541,54 @@ void WebServer::handleApiChannels(uint8_t sn){
     const RuntimeConfig& cfg=Cfg();
     uint8_t st=m_app?m_app->getChannelStatus():0;
 
-    bool e=cfg.channels.eth_enabled     ||cfg.eth_enabled;
-    bool g=cfg.channels.gsm_enabled     ||cfg.gsm_enabled;
-    bool w=cfg.channels.wifi_enabled    ||cfg.wifi_enabled;
-    bool i=cfg.channels.iridium_enabled ||cfg.iridium_enabled;
+    bool en[4] = {
+        cfg.channels.eth_enabled     || cfg.eth_enabled,
+        cfg.channels.gsm_enabled     || cfg.gsm_enabled,
+        cfg.channels.wifi_enabled    || cfg.wifi_enabled,
+        cfg.channels.iridium_enabled || cfg.iridium_enabled
+    };
 
-    const char* se = e?((st&0x01)?"ACTIVE":"STANDBY"):"DISABLED";
-    const char* sg = g?((st&0x02)?"ACTIVE":"STANDBY"):"DISABLED";
-    const char* sw = w?((st&0x04)?"ACTIVE":"STANDBY"):"DISABLED";
-    const char* si = i?((st&0x08)?"ACTIVE":"STANDBY"):"DISABLED";
+    // Используем channels.chain_order (новое поле из UI), fallback на legacy
+    const uint8_t* co = (cfg.channels.chain_count > 0)
+                        ? cfg.channels.chain_order
+                        : cfg.chain_order;
 
-    char buf[768];
-    int len=std::snprintf(buf,sizeof(buf),
-        "{\"channels\":["
-        "{\"name\":\"Ethernet W5500\",\"status\":\"%s\",\"label\":\"%s\",\"priority\":\"1\"},"
-        "{\"name\":\"GSM Air780E\",   \"status\":\"%s\",\"label\":\"%s\",\"priority\":\"2\"},"
-        "{\"name\":\"WiFi ESP8266\",  \"status\":\"%s\",\"label\":\"%s\",\"priority\":\"%s\"},"
-        "{\"name\":\"Iridium SBD\",   \"status\":\"%s\",\"label\":\"%s\",\"priority\":\"%s\"}"
-        "],"
-        "\"eth\":\"%s\",\"gsm\":\"%s\",\"wifi\":\"%s\",\"iridium\":\"%s\"}",
-        se,se, sg,sg, sw,sw,w?"3":"—", si,si,i?"4":"—",
-        se,sg,sw,si);
+    // Статус каждого канала (биты: 0=ETH,1=GSM,2=WiFi,3=Iridium)
+    const char* status[4];
+    status[0] = en[0] ? ((st&0x01)?"ACTIVE":"STANDBY") : "DISABLED";
+    status[1] = en[1] ? ((st&0x02)?"ACTIVE":"STANDBY") : "DISABLED";
+    status[2] = en[2] ? ((st&0x04)?"ACTIVE":"STANDBY") : "DISABLED";
+    status[3] = en[3] ? ((st&0x08)?"ACTIVE":"STANDBY") : "DISABLED";
+
+    // Приоритет: позиция в chain_order (1-based), "-" если disabled
+    char prio[4][3];
+    for(int i=0;i<4;i++) std::strncpy(prio[i],"-",sizeof(prio[i])-1);
+    for(int pos=0;pos<4;pos++){
+        int ci=(int)co[pos];
+        if(ci>=0&&ci<4&&en[ci]){
+            std::snprintf(prio[ci],sizeof(prio[ci]),"%d",pos+1);
+        }
+    }
+
+    const char* chNames[4]={"Ethernet W5500","GSM Air780E","WiFi ESP8266","Iridium SBD"};
+
+    // Инициализируем буфер нулями, чтобы не было мусора
+    char buf[640]{};
+    int len=0;
+    len += std::snprintf(buf+len,(int)sizeof(buf)-len,"{\"channels\":[");
+    for(int pos=0;pos<4;pos++){
+        int ci=(int)co[pos];
+        if(ci<0||ci>3) ci=pos;
+        len += std::snprintf(buf+len,(int)sizeof(buf)-len,
+            "%s{\"name\":\"%s\",\"status\":\"%s\",\"priority\":\"%s\"}",
+            pos>0?",":"",
+            chNames[ci], status[ci], prio[ci]);
+    }
+    len += std::snprintf(buf+len,(int)sizeof(buf)-len,
+        "],\"eth\":\"%s\",\"gsm\":\"%s\",\"wifi\":\"%s\",\"iridium\":\"%s\"}",
+        status[0],status[1],status[2],status[3]);
+    if(len>=(int)sizeof(buf)) len=(int)sizeof(buf)-1;
+    buf[len]='\0';
     sendResponse(sn,200,"application/json",buf,(uint16_t)len);
 }
 
@@ -4634,6 +4810,7 @@ void WebServer::handlePostConfig(uint8_t sn,const char* body){
     // Parse into backup object first; commit only after successful parse.
     // This avoids rollback copies around save path and keeps mutation localized.
     RuntimeConfig& tmp = CfgBackup();
+    tmp = Cfg();   // init from current config so unset fields keep their values
     if(tmp.loadFromJson(body,std::strlen(body))){
         bool sdSaved = tmp.saveToSd(RUNTIME_CONFIG_FILENAME);
         if (sdSaved) m_sdOk = true;
@@ -5057,6 +5234,12 @@ void WebServer::tick(){
                         (HAL_GetTick()-t0)<5000){ IWDG->KR=0xAAAA; HAL_Delay(2); }
                 }
                 disconnect(HTTP_SOCKET);
+                // close() sends RST immediately — no need to wait for SOCK_CLOSED.
+                // Waiting (previous approach) blocked tick() up to 200ms, causing
+                // ERR_CONNECTION_REFUSED when the browser fired reloadCfg() before
+                // the socket returned to LISTEN.
+                close(HTTP_SOCKET);
+                if(socket(HTTP_SOCKET,Sn_MR_TCP,HTTP_PORT,0)==HTTP_SOCKET) listen(HTTP_SOCKET);
             }
             break;
         }

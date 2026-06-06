@@ -131,17 +131,29 @@ bool ChannelManager::trySend(Channel ch, const char* json, uint16_t len) {
 SendResult ChannelManager::sendData(const char* json, uint16_t len) {
     const RuntimeConfig& c = Cfg();
 
-    if (c.chain_enabled && c.chain_count > 0) {
-        // Use configured priority chain
-        for (uint8_t i = 0; i < c.chain_count; i++) {
-            Channel ch = (Channel)c.chain_order[i];
+    // Всегда используем chain_order — приоритет: channels.chain_order (новое),
+    // затем legacy chain_order. chain_enabled больше не блокирует логику.
+    uint8_t count = 0;
+    const uint8_t* order = nullptr;
+
+    if (c.channels.chain_count > 0) {
+        order = c.channels.chain_order;
+        count = c.channels.chain_count;
+    } else if (c.chain_count > 0) {
+        order = c.chain_order;
+        count = c.chain_count;
+    }
+
+    if (order && count > 0) {
+        for (uint8_t i = 0; i < count; i++) {
+            Channel ch = (Channel)order[i];
             if ((uint8_t)ch >= (uint8_t)Channel::COUNT) continue;
-            if (trySend(ch, json, len)) return SendResult::Ok;
+            if (trySend(ch, json, len)) { m_lastSentChannel = ch; return SendResult::Ok; }
         }
     } else {
-        // Simple mode: try enabled channels in default order
+        // Нет chain_order вообще — перебираем в порядке enum
         for (uint8_t i = 0; i < (uint8_t)Channel::COUNT; i++) {
-            if (trySend((Channel)i, json, len)) return SendResult::Ok;
+            if (trySend((Channel)i, json, len)) { m_lastSentChannel = (Channel)i; return SendResult::Ok; }
         }
     }
 
