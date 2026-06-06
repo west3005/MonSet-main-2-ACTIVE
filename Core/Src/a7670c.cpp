@@ -166,7 +166,9 @@ GsmStatus A7670C::activatePdnA7670()
     const RuntimeConfig& c = Cfg();
     char r[256], cmd[128];
 
-    std::snprintf(cmd, sizeof(cmd), "+CGDCONT=1,\"IP\",\"%s\"", c.gsm_apn);
+    // Если APN не задан — используем Tele2 (временно для отладки)
+    const char* apn = (c.gsm_apn[0] != '\0') ? c.gsm_apn : "internet.tele2.ru";
+    std::snprintf(cmd, sizeof(cmd), "+CGDCONT=1,\"IP\",\"%s\"", apn);
     sendCommand(cmd, r, sizeof(r), Config::SIM7020_CMD_TIMEOUT_MS);
 
     if (sendCommand("+CGACT=1,1", r, sizeof(r),
@@ -295,7 +297,10 @@ GsmStatus A7670C::init()
 void A7670C::disconnect()
 {
     char r[64];
-    sendCommand("+CSOCL=0", r, sizeof(r), 2000);
+    // AT+CIPCLOSE — закрыть TCP сокет (CIPOPEN стек)
+    sendCommand("+CIPCLOSE=0", r, sizeof(r), 2000);
+    // AT+NETCLOSE — закрыть TCP/IP стек
+    sendCommand("+NETCLOSE", r, sizeof(r), 3000);
     sendCommand("+CGACT=0,1", r, sizeof(r), 5000);
     DBG.info("A7670C: отключён");
 }

@@ -34,7 +34,7 @@ extern "C" {
 // ============================================================================
 // Константы
 // ============================================================================
-static constexpr uint16_t MODEM_MAX_SEND = 512;
+static constexpr uint16_t MODEM_MAX_SEND = 256;  // A7670C: >256 иногда ERROR
 static constexpr uint16_t MODEM_MAX_RECV = 512;
 static constexpr uint8_t  CIP_LINK       = 0;    ///< A7670C: первый доступный link
 
@@ -139,9 +139,12 @@ int A7670CTls::modemWriteRaw(const uint8_t* buf, uint16_t len)
         m_modem.flushRx_pub();
         m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
 
-        m_modem.waitFor_pub(r, sizeof(r), ">", 3000);
+        // A7670C: после AT+CIPSEND сначала шлёт "OK\r\n", потом ">"
+        // waitFor_pub останавливается на 50мс паузе — используем waitForUrc_pub
+        m_modem.waitForUrc_pub(r, sizeof(r), ">", 5000);
         if (!std::strstr(r, ">")) {
-            DBG.error("TLS BIO: нет prompt \'>\'  для CIPSEND (chunk=%u)", (unsigned)chunk);
+            DBG.error("TLS BIO: no CIPSEND prompt, chunk=%u raw=[%.40s]",
+                      (unsigned)chunk, r);
             return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
         }
 
@@ -255,38 +258,9 @@ int A7670CTls::connect(const char* host, uint16_t port)
     std::strncpy(connectAddr, host, sizeof(connectAddr) - 1);
     connectAddr[sizeof(connectAddr) - 1] = '\0';
 
-    m_modem.flushRx_pub();
-    std::snprintf(cmd, sizeof(cmd), "AT+CDNSGIP=\"%s\"\r\n", host);
-    m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-    DBG.info("TLS: DNS resolving %s...", host);
-    // Формат A7670C: +CDNSGIP: 1,<count>,"host","ip1","ip2",...
-    // Успех = "+CDNSGIP: 1", ошибка = "+CDNSGIP: 0,<errcode>"
-    uint16_t dnsRxLen = m_modem.waitFor_pub(r, sizeof(r), "+CDNSGIP:", 10000);
-    (void)dnsRxLen;
-    if (std::strstr(r, "+CDNSGIP: 1")) {
-        // Пропускаем три запятые: "1,<count>,"host","ip"
-        const char* p1 = std::strstr(r, "+CDNSGIP: 1");
-        const char* c1 = std::strchr(p1, ',');           // после "1"
-        if (c1) c1 = std::strchr(c1 + 1, ',');          // после count
-        if (c1) c1 = std::strchr(c1 + 1, ',');          // после "host"
-        if (c1) {
-            c1++;
-            while (*c1 == ' ' || *c1 == '"') c1++;
-            size_t ipLen = 0;
-            while (c1[ipLen] && c1[ipLen] != '"' && c1[ipLen] != '\r' &&
-                   c1[ipLen] != '\n' && ipLen < sizeof(connectAddr) - 1) {
-                connectAddr[ipLen] = c1[ipLen];
-                ipLen++;
-            }
-            connectAddr[ipLen] = '\0';
-        }
-        if (connectAddr[0] && std::strcmp(connectAddr, host) != 0)
-            DBG.info("TLS: DNS OK %s -> %s", host, connectAddr);
-        else
-            DBG.warn("TLS: DNS parse fail, using hostname");
-    } else {
-        DBG.warn("TLS: DNS fail [%.40s], using hostname", r);
-    }
+    // AT+CDNSGIP не поддерживается данной прошивкой A7670C.
+    // Передаём hostname напрямую — A7670C резолвит его внутри стека при CIPOPEN.
+    DBG.info("TLS: skip DNS, use hostname %s", connectAddr);
 
     // AT+CIPOPEN=<id>,"TCP","<ip_or_host>",<port>
     // Модем сначала отвечает "OK", затем асинхронно "+CIPOPEN: <id>,<err>"
@@ -302,22 +276,32 @@ int A7670CTls::connect(const char* host, uint16_t port)
     // по маркеру или таймауту 18с.
     {
         char cipBuf[256] = {};
+        // waitForUrc_pub останавливается на маркере "+CIPOPEN:" не дочитав числа.
+        // Дочитываем "\r\n" чтобы получить полный URC: "+CIPOPEN: 0,0\r\n"
         m_modem.waitForUrc_pub(cipBuf, sizeof(cipBuf), "+CIPOPEN:", 18000);
-
+        {
+            uint16_t already = (uint16_t)std::strlen(cipBuf);
+            if (already < sizeof(cipBuf) - 1)
+                m_modem.waitFor_pub(cipBuf + already,
+                                    (uint16_t)(sizeof(cipBuf) - already - 1),
+                                    "\r\n", 500);
+        }
+        DBG.info("TLS: CIPOPEN raw [%.80s]", cipBuf);
         if (!std::strstr(cipBuf, "+CIPOPEN:")) {
-            DBG.error("TLS: CIPOPEN no response [%.80s]", cipBuf);
+            DBG.error("TLS: CIPOPEN no URC, raw=[%.80s]", cipBuf);
             return -1;
         }
         int id = 0, err = -1;
         const char* p = std::strstr(cipBuf, "+CIPOPEN:");
         std::sscanf(p, "+CIPOPEN: %d,%d", &id, &err);
         if (err != 0) {
-            DBG.error("TLS: CIPOPEN err=%d addr=%s:%u", err, connectAddr, (unsigned)port);
+            DBG.error("TLS: CIPOPEN err=%d addr=%s:%u raw=[%.60s]", err, connectAddr, (unsigned)port, cipBuf);
             return -2;
         }
         std::memcpy(r, cipBuf, sizeof(r));
     }
     DBG.info("TLS: TCP open OK (link=%u)", (unsigned)m_sockId);
+    HAL_Delay(300);  // A7670C: пауза после CIPOPEN перед первым CIPSEND
 
     // ---- mbedTLS seed ----
     const char* pers = "a7670c_tls";
@@ -418,14 +402,70 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
         return -1;
     }
 
-    int rc = connect(u.host, u.port);
-    if (rc != 0) {
-        DBG.error("TLS: connect failed rc=%d", rc);
+    char cmd[256], r[256];
+
+    // --- Запускаем SSL сервис ---
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CCHSTART\r\n", 14);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 5000);
+    // +CCHSTART: 0 = уже запущен, тоже OK
+    if (!std::strstr(r, "OK") && !std::strstr(r, "+CCHSTART: 0")) {
+        DBG.error("TLS: CCHSTART fail [%.40s]", r);
         return -2;
     }
+    DBG.info("TLS CCH: CCHSTART OK");
 
-    // HTTP-заголовок
-    char hdr[700];
+    // --- Настраиваем SSL контекст (ctx 0) ---
+    // sslversion: 4 = TLS (auto-negotiate)
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CSSLCFG=\"sslversion\",0,4\r\n", 28);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    // authmode: 0 = no auth (без проверки CA сертификата)
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CSSLCFG=\"authmode\",0,0\r\n", 27);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    // ignorelocaltime: игнорировать локальное время при проверке сертификата
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CSSLCFG=\"ignorelocaltime\",0,1\r\n", 34);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    // enableSNI: 1 = включить SNI (требуется для hostname-based серверов)
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CSSLCFG=\"enableSNI\",0,1\r\n", 29);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    // Привязываем SSL контекст 0 к CCH сессии 0
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CCHSSLCFG=0,0\r\n", 19);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    DBG.info("TLS CCH: SSL ctx configured");
+
+    // --- Открываем SSL соединение ---
+    // AT+CCHOPEN=<session>,<host>,<port>  (без ssl_type — задан через CCHSSLCFG)
+    m_modem.flushRx_pub();
+    std::snprintf(cmd, sizeof(cmd), "AT+CCHOPEN=0,\"%s\",%u\r\n", u.host, (unsigned)u.port);
+    m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
+    DBG.info("TLS CCH: CCHOPEN %s:%u ...", u.host, (unsigned)u.port);
+    // Ответ: +CCHOPEN: 0,0 (успех) или +CCHOPEN: 0,<err>
+    m_modem.waitForUrc_pub(r, sizeof(r), "+CCHOPEN:", 30000);
+    {
+        uint16_t already = (uint16_t)std::strlen(r);
+        if (already < sizeof(r) - 1)
+            m_modem.waitFor_pub(r + already, (uint16_t)(sizeof(r) - already - 1), "\r\n", 1000);
+    }
+    DBG.info("TLS CCH: CCHOPEN raw [%.60s]", r);
+    int sess = -1, cerr = -1;
+    const char* cp = std::strstr(r, "+CCHOPEN:");
+    if (cp) std::sscanf(cp, "+CCHOPEN: %d,%d", &sess, &cerr);
+    if (cerr != 0) {
+        DBG.error("TLS CCH: CCHOPEN err=%d", cerr);
+        m_modem.flushRx_pub();
+        m_modem.sendRaw_pub("AT+CCHSTOP\r\n", 13);
+        m_modem.waitFor_pub(r, sizeof(r), "OK", 3000);
+        return -3;
+    }
+    DBG.info("TLS CCH: SSL open OK");
+
+    // --- Формируем HTTP запрос ---
+    char hdr[512];
     int hdrLen;
     const char* auth = Cfg().server_auth_b64;
     if (auth && auth[0]) {
@@ -448,69 +488,133 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
             "\r\n",
             u.path, u.host, (unsigned)jsonLen);
     }
+    uint16_t totalLen = (uint16_t)hdrLen + jsonLen;
 
-    if (hdrLen <= 0 || (size_t)hdrLen >= sizeof(hdr)) {
-        DBG.error("TLS HTTP: header overflow");
-        close(); return -50;
+    // --- Отправляем через AT+CCHSEND ---
+    // AT+CCHSEND=<session>,<len> → prompt ">" → данные → +CCHSEND: 0,0
+    m_modem.flushRx_pub();
+    std::snprintf(cmd, sizeof(cmd), "AT+CCHSEND=0,%u\r\n", (unsigned)totalLen);
+    m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
+    DBG.info("TLS CCH: CCHSEND %u bytes...", (unsigned)totalLen);
+
+    m_modem.waitForUrc_pub(r, sizeof(r), ">", 5000);
+    if (!std::strstr(r, ">")) {
+        DBG.error("TLS CCH: no CCHSEND prompt raw=[%.40s]", r);
+        cchClose();
+        return -4;
     }
 
-    // Отправляем заголовок + тело через mbedTLS
-    int w;
-    size_t off = 0;
-    const uint8_t* hdrBuf = reinterpret_cast<const uint8_t*>(hdr);
-    while (off < (size_t)hdrLen) {
-        w = mbedtls_ssl_write(&m_ssl, hdrBuf + off, (size_t)hdrLen - off);
-        if (w > 0) { off += (size_t)w; continue; }
-        if (w == MBEDTLS_ERR_SSL_WANT_READ || w == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            HAL_Delay(2); IWDG->KR = 0xAAAA; continue;
-        }
-        logMbedtlsErr("TLS HTTP: write header", w);
-        close(); return -51;
-    }
+    // Отправляем заголовок и тело одним потоком
+    m_modem.sendRaw_pub(hdr, (uint16_t)hdrLen);
+    m_modem.sendRaw_pub(json, jsonLen);
 
-    off = 0;
-    const uint8_t* jsonBuf = reinterpret_cast<const uint8_t*>(json);
-    while (off < (size_t)jsonLen) {
-        w = mbedtls_ssl_write(&m_ssl, jsonBuf + off, (size_t)jsonLen - off);
-        if (w > 0) { off += (size_t)w; continue; }
-        if (w == MBEDTLS_ERR_SSL_WANT_READ || w == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            HAL_Delay(2); IWDG->KR = 0xAAAA; continue;
-        }
-        logMbedtlsErr("TLS HTTP: write body", w);
-        close(); return -52;
-    }
-
-    // Читаем HTTP-ответ
+    // Ждём ответ модема после отправки данных.
+    // A7670C может прислать:
+    //   a) "+CCHSEND: 0,0" (ack отправки), затем отдельно "+CCHRECV: DATA,..."
+    //   b) Сразу "+CCHRECV: DATA,0,N\r\nHTTP/1.1 ..." без CCHSEND ack
+    // Ждём любой из маркеров, таймаут 10с.
     static char rx[1024];
     int used = 0, httpCode = -1;
-    const uint32_t t0 = HAL_GetTick();
 
-    while ((HAL_GetTick() - t0) < m_timeoutMs) {
-        int r = mbedtls_ssl_read(&m_ssl,
-                                  reinterpret_cast<unsigned char*>(rx + used),
-                                  (size_t)(sizeof(rx) - 1 - used));
-        if (r > 0) {
-            used += r;
+    m_modem.waitForUrc_pub(r, sizeof(r), "+CCH", 10000);
+    {
+        uint16_t already = (uint16_t)std::strlen(r);
+        if (already < sizeof(r) - 1)
+            m_modem.waitFor_pub(r + already, (uint16_t)(sizeof(r) - already - 1), "\r\n", 1000);
+    }
+    DBG.info("TLS CCH: after-send buf [%.80s]", r);
+
+    // Случай (b): HTTP ответ уже в буфере вместе с CCHRECV
+    if (std::strstr(r, "HTTP/1.")) {
+        // Извлекаем HTTP часть
+        const char* hp = std::strstr(r, "HTTP/1.");
+        int hlen = (int)std::strlen(hp);
+        if (hlen > (int)sizeof(rx) - 1) hlen = (int)sizeof(rx) - 1;
+        std::memcpy(rx, hp, (size_t)hlen);
+        rx[hlen] = '\0';
+        used = hlen;
+        DBG.info("TLS CCH: HTTP in ack buf");
+    }
+    // Случай (a): пришёл CCHRECV URC — нужно запросить данные
+    // r[] уже содержит начало ответа (after-send buf прочитал первый чанк).
+    // НЕ делаем flush — копируем r[] в rx и дочитываем остаток.
+    else if (std::strstr(r, "+CCHRECV:")) {
+        int recvLen = 0;
+        const char* rp = std::strstr(r, "DATA,");
+        if (rp) std::sscanf(rp, "DATA,%*d,%d", &recvLen);
+        if (recvLen > 0) {
+            // Шаг 1: копируем уже прочитанный буфер r[] в rx
+            used = (int)std::strlen(r);
+            if (used > (int)sizeof(rx) - 1) used = (int)sizeof(rx) - 1;
+            std::memcpy(rx, r, (size_t)used);
             rx[used] = '\0';
-            const char* p = std::strstr(rx, "HTTP/1.");
-            if (p) {
-                int code = 0;
-                if (std::sscanf(p, "HTTP/%*s %d", &code) == 1) {
-                    httpCode = code;
-                    DBG.info("TLS HTTP: code=%d", httpCode);
-                    break;
-                }
+            // Шаг 2: дочитываем остаток из UART (без flush!) до финального OK
+            std::snprintf(cmd, sizeof(cmd), "AT+CCHRECV=0,%d\r\n", recvLen);
+            m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
+            uint16_t avail = (uint16_t)(sizeof(rx) - 1 - (uint16_t)used);
+            if (avail > 0) {
+                m_modem.waitFor_pub(rx + used, avail, "\r\nOK\r\n", 6000);
+                used = (int)std::strlen(rx);
             }
-            continue;
+            DBG.info("TLS CCH: raw recv len=%d", used);
+            // Ищем HTTP/1. в любом месте объединённого буфера
+            const char* hstart = std::strstr(rx, "HTTP/1.");
+            if (hstart) {
+                int hl = (int)std::strlen(hstart);
+                std::memmove(rx, hstart, (size_t)hl + 1);
+                used = hl;
+            } else {
+                used = (int)std::strlen(rx);
+            }
+            DBG.info("TLS CCH: CCHRECV data [%.60s]", rx);
         }
-        if (r == 0) break;
-        if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            HAL_Delay(5); IWDG->KR = 0xAAAA; continue;
-        }
-        logMbedtlsErr("TLS HTTP: read response", r);
-        break;
     }
 
-    close();
+    // Дочитываем если HTTP ответ ещё не полный
+    const uint32_t t0 = HAL_GetTick();
+    while (!std::strstr(rx, "HTTP/1.") &&
+           (HAL_GetTick() - t0) < 8000 &&
+           used < (int)sizeof(rx) - 1) {
+        char urc[128] = {};
+        m_modem.waitForUrc_pub(urc, sizeof(urc), "+CCHRECV:", 3000);
+        if (!std::strstr(urc, "+CCHRECV:")) break;
+        int recvLen = 0;
+        const char* rp2 = std::strstr(urc, "DATA,");
+        if (rp2) std::sscanf(rp2, "DATA,%*d,%d", &recvLen);
+        if (recvLen <= 0) break;
+        std::snprintf(cmd, sizeof(cmd), "AT+CCHRECV=0,%d\r\n", recvLen);
+        m_modem.flushRx_pub();
+        m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
+        char* dst = rx + used;
+        m_modem.waitFor_pub(dst, (uint16_t)(sizeof(rx) - 1 - used), "\r\n\r\n", 3000);
+        const char* ds2 = std::strstr(dst, "\r\n");
+        if (ds2) { ds2 += 2; int dl = (int)std::strlen(ds2); std::memmove(dst, ds2, (size_t)dl + 1); used += dl; }
+        else { used += (int)std::strlen(dst); }
+        rx[used] = '\0';
+        IWDG->KR = 0xAAAA;
+    }
+
+    // Парсим HTTP код
+    const char* p = std::strstr(rx, "HTTP/1.");
+    if (p) {
+        std::sscanf(p, "HTTP/1.%*d %d", &httpCode);
+        DBG.info("TLS CCH: HTTP %d", httpCode);
+    } else {
+        DBG.error("TLS CCH: нет HTTP ответа [%.60s]", rx);
+    }
+
+    cchClose();
     return httpCode;
+}
+
+void A7670CTls::cchClose()
+{
+    char r[64];
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CCHCLOSE=0\r\n", 16);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 3000);
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CCHSTOP\r\n", 13);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 3000);
+    DBG.info("TLS CCH: closed");
 }
