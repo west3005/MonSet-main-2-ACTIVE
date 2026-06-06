@@ -508,59 +508,78 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
     m_modem.sendRaw_pub(hdr, (uint16_t)hdrLen);
     m_modem.sendRaw_pub(json, jsonLen);
 
-    // Ждём подтверждение отправки: +CCHSEND: 0,0
-    m_modem.waitForUrc_pub(r, sizeof(r), "+CCHSEND:", 10000);
+    // Ждём ответ модема после отправки данных.
+    // A7670C может прислать:
+    //   a) "+CCHSEND: 0,0" (ack отправки), затем отдельно "+CCHRECV: DATA,..."
+    //   b) Сразу "+CCHRECV: DATA,0,N\r\nHTTP/1.1 ..." без CCHSEND ack
+    // Ждём любой из маркеров, таймаут 10с.
+    static char rx[1024];
+    int used = 0, httpCode = -1;
+
+    m_modem.waitForUrc_pub(r, sizeof(r), "+CCH", 10000);
     {
         uint16_t already = (uint16_t)std::strlen(r);
         if (already < sizeof(r) - 1)
-            m_modem.waitFor_pub(r + already, (uint16_t)(sizeof(r) - already - 1), "\r\n", 500);
+            m_modem.waitFor_pub(r + already, (uint16_t)(sizeof(r) - already - 1), "\r\n", 1000);
     }
-    DBG.info("TLS CCH: CCHSEND ack [%.40s]", r);
-    int sack = -1;
-    const char* sp = std::strstr(r, "+CCHSEND:");
-    if (sp) { int tmp; std::sscanf(sp, "+CCHSEND: %d,%d", &tmp, &sack); }
-    if (sack != 0) {
-        DBG.warn("TLS CCH: CCHSEND ack err=%d (продолжаем читать ответ)", sack);
+    DBG.info("TLS CCH: after-send buf [%.80s]", r);
+
+    // Случай (b): HTTP ответ уже в буфере вместе с CCHRECV
+    if (std::strstr(r, "HTTP/1.")) {
+        // Извлекаем HTTP часть
+        const char* hp = std::strstr(r, "HTTP/1.");
+        int hlen = (int)std::strlen(hp);
+        if (hlen > (int)sizeof(rx) - 1) hlen = (int)sizeof(rx) - 1;
+        std::memcpy(rx, hp, (size_t)hlen);
+        rx[hlen] = '\0';
+        used = hlen;
+        DBG.info("TLS CCH: HTTP in ack buf");
+    }
+    // Случай (a): пришёл CCHRECV URC — нужно запросить данные
+    else if (std::strstr(r, "+CCHRECV:")) {
+        int recvLen = 0;
+        const char* rp = std::strstr(r, "DATA,");
+        if (rp) std::sscanf(rp, "DATA,%*d,%d", &recvLen);
+        if (recvLen > 0) {
+            std::snprintf(cmd, sizeof(cmd), "AT+CCHRECV=0,%d\r\n", recvLen);
+            m_modem.flushRx_pub();
+            m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
+            m_modem.waitFor_pub(rx, (uint16_t)(sizeof(rx) - 1), "\r\n\r\n", 5000);
+            // Пропускаем заголовок +CCHRECV: DATA,0,N\r\n
+            const char* ds = std::strstr(rx, "\r\n");
+            if (ds) {
+                ds += 2;
+                int dl = (int)std::strlen(ds);
+                std::memmove(rx, ds, (size_t)dl + 1);
+                used = dl;
+            } else {
+                used = (int)std::strlen(rx);
+            }
+            DBG.info("TLS CCH: CCHRECV data [%.40s]", rx);
+        }
     }
 
-    // --- Читаем HTTP ответ ---
-    // A7670C уведомляет: +CCHRECV: DATA,0,<len>
-    static char rx[1024];
-    int used = 0, httpCode = -1;
+    // Дочитываем если HTTP ответ ещё не полный
     const uint32_t t0 = HAL_GetTick();
-
-    while ((HAL_GetTick() - t0) < 15000 && used < (int)sizeof(rx) - 1) {
-        // Ждём URC +CCHRECV: DATA,0,<len>
+    while (!std::strstr(rx, "HTTP/1.") &&
+           (HAL_GetTick() - t0) < 8000 &&
+           used < (int)sizeof(rx) - 1) {
         char urc[128] = {};
         m_modem.waitForUrc_pub(urc, sizeof(urc), "+CCHRECV:", 3000);
-        if (!std::strstr(urc, "+CCHRECV:")) break;  // таймаут — данных нет
-
+        if (!std::strstr(urc, "+CCHRECV:")) break;
         int recvLen = 0;
-        const char* rp = std::strstr(urc, "DATA,");
-        if (rp) std::sscanf(rp, "DATA,%*d,%d", &recvLen);
+        const char* rp2 = std::strstr(urc, "DATA,");
+        if (rp2) std::sscanf(rp2, "DATA,%*d,%d", &recvLen);
         if (recvLen <= 0) break;
-
-        // AT+CCHRECV=<session>,<len>
         std::snprintf(cmd, sizeof(cmd), "AT+CCHRECV=0,%d\r\n", recvLen);
         m_modem.flushRx_pub();
         m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-
-        // Читаем: +CCHRECV: DATA,0,<actual>\r\n<data>
         char* dst = rx + used;
-        uint16_t avail = (uint16_t)(sizeof(rx) - 1 - used);
-        m_modem.waitFor_pub(dst, avail, "\r\n\r\n", 3000);
-        // Пропускаем заголовок +CCHRECV: до данных
-        const char* dataStart = std::strstr(dst, "\r\n");
-        if (dataStart) {
-            dataStart += 2;
-            int dataLen = (int)std::strlen(dataStart);
-            std::memmove(dst, dataStart, (size_t)dataLen + 1);
-            used += dataLen;
-        } else {
-            used += (int)std::strlen(dst);
-        }
+        m_modem.waitFor_pub(dst, (uint16_t)(sizeof(rx) - 1 - used), "\r\n\r\n", 3000);
+        const char* ds2 = std::strstr(dst, "\r\n");
+        if (ds2) { ds2 += 2; int dl = (int)std::strlen(ds2); std::memmove(dst, ds2, (size_t)dl + 1); used += dl; }
+        else { used += (int)std::strlen(dst); }
         rx[used] = '\0';
-        if (std::strstr(rx, "HTTP/1.")) break;  // получили статус
         IWDG->KR = 0xAAAA;
     }
 
