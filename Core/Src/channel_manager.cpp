@@ -148,12 +148,12 @@ SendResult ChannelManager::sendData(const char* json, uint16_t len) {
         for (uint8_t i = 0; i < count; i++) {
             Channel ch = (Channel)order[i];
             if ((uint8_t)ch >= (uint8_t)Channel::COUNT) continue;
-            if (trySend(ch, json, len)) return SendResult::Ok;
+            if (trySend(ch, json, len)) { m_lastSentChannel = ch; return SendResult::Ok; }
         }
     } else {
         // Нет chain_order вообще — перебираем в порядке enum
         for (uint8_t i = 0; i < (uint8_t)Channel::COUNT; i++) {
-            if (trySend((Channel)i, json, len)) return SendResult::Ok;
+            if (trySend((Channel)i, json, len)) { m_lastSentChannel = (Channel)i; return SendResult::Ok; }
         }
     }
 
