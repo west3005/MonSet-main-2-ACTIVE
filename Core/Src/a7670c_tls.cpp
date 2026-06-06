@@ -544,18 +544,24 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
             std::snprintf(cmd, sizeof(cmd), "AT+CCHRECV=0,%d\r\n", recvLen);
             m_modem.flushRx_pub();
             m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-            m_modem.waitFor_pub(rx, (uint16_t)(sizeof(rx) - 1), "\r\n\r\n", 5000);
-            // Пропускаем заголовок +CCHRECV: DATA,0,N\r\n
-            const char* ds = std::strstr(rx, "\r\n");
-            if (ds) {
-                ds += 2;
-                int dl = (int)std::strlen(ds);
-                std::memmove(rx, ds, (size_t)dl + 1);
-                used = dl;
+            // Ждём "HTTP/1." — полный ответ без усечения по \r\n\r\n
+            m_modem.waitFor_pub(rx, (uint16_t)(sizeof(rx) - 1), "HTTP/1.", 5000);
+            // Дочитываем строку статуса (ещё 20 байт)
+            {
+                uint16_t got = (uint16_t)std::strlen(rx);
+                if (got < sizeof(rx) - 21)
+                    m_modem.waitFor_pub(rx + got, 20, "\r\n", 500);
+            }
+            // Ищем HTTP/1. в буфере (может быть не в начале)
+            const char* hstart = std::strstr(rx, "HTTP/1.");
+            if (hstart && hstart != rx) {
+                int hl = (int)std::strlen(hstart);
+                std::memmove(rx, hstart, (size_t)hl + 1);
+                used = hl;
             } else {
                 used = (int)std::strlen(rx);
             }
-            DBG.info("TLS CCH: CCHRECV data [%.40s]", rx);
+            DBG.info("TLS CCH: CCHRECV data [%.60s]", rx);
         }
     }
 
