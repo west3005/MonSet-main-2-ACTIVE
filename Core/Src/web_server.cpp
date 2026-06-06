@@ -85,18 +85,26 @@ WebServer::WebServer() {}
 // ── W5500 TX-safe send: wait for space then send ─────────────────────────────
 static bool w5500_send(uint8_t sn, const uint8_t* buf, uint16_t len){
     if(!len) return true;
-    uint32_t t0 = HAL_GetTick();
-    // Wait until TX buffer has enough free space (max TX_FSR_TIMEOUT_MS)
-    while(getSn_TX_FSR(sn) < len){
-        if((HAL_GetTick() - t0) > 3000U){ // TX_FSR_TIMEOUT_MS
-            DBG.warn("WebServer: TX_FSR timeout sn=%u len=%u fsr=%u",
-                (unsigned)sn,(unsigned)len,(unsigned)getSn_TX_FSR(sn));
-            return false;
+    uint16_t sent = 0;
+    while(sent < len){
+        // Ждём хоть какого-то свободного места в TX FIFO (не обязательно весь чанк)
+        uint32_t t0 = HAL_GetTick();
+        uint16_t fsr = 0;
+        while((fsr = getSn_TX_FSR(sn)) == 0){
+            if((HAL_GetTick() - t0) > 3000U){
+                DBG.warn("WebServer: TX_FSR timeout sn=%u sent=%u/%u",
+                    (unsigned)sn,(unsigned)sent,(unsigned)len);
+                return false;
+            }
+            IWDG->KR = 0xAAAA;
+            HAL_Delay(2);
         }
-        IWDG->KR = 0xAAAA;
-        HAL_Delay(2);
+        // Отправляем столько сколько влезает прямо сейчас
+        uint16_t now = len - sent;
+        if(now > fsr) now = fsr;
+        send(sn, (uint8_t*)(buf + sent), now);
+        sent += now;
     }
-    send(sn, (uint8_t*)buf, len);
     return true;
 }
 
