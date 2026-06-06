@@ -4541,27 +4541,47 @@ void WebServer::handleApiChannels(uint8_t sn){
     const RuntimeConfig& cfg=Cfg();
     uint8_t st=m_app?m_app->getChannelStatus():0;
 
-    bool e=cfg.channels.eth_enabled     ||cfg.eth_enabled;
-    bool g=cfg.channels.gsm_enabled     ||cfg.gsm_enabled;
-    bool w=cfg.channels.wifi_enabled    ||cfg.wifi_enabled;
-    bool i=cfg.channels.iridium_enabled ||cfg.iridium_enabled;
+    bool en[4] = {
+        cfg.channels.eth_enabled     || cfg.eth_enabled,
+        cfg.channels.gsm_enabled     || cfg.gsm_enabled,
+        cfg.channels.wifi_enabled    || cfg.wifi_enabled,
+        cfg.channels.iridium_enabled || cfg.iridium_enabled
+    };
+    const uint8_t (&co)[4] = cfg.chain_order;
 
-    const char* se = e?((st&0x01)?"ACTIVE":"STANDBY"):"DISABLED";
-    const char* sg = g?((st&0x02)?"ACTIVE":"STANDBY"):"DISABLED";
-    const char* sw = w?((st&0x04)?"ACTIVE":"STANDBY"):"DISABLED";
-    const char* si = i?((st&0x08)?"ACTIVE":"STANDBY"):"DISABLED";
+    // Статус каждого канала (биты: 0=ETH,1=GSM,2=WiFi,3=Iridium)
+    const char* status[4];
+    status[0] = en[0] ? ((st&0x01)?"ACTIVE":"STANDBY") : "DISABLED";
+    status[1] = en[1] ? ((st&0x02)?"ACTIVE":"STANDBY") : "DISABLED";
+    status[2] = en[2] ? ((st&0x04)?"ACTIVE":"STANDBY") : "DISABLED";
+    status[3] = en[3] ? ((st&0x08)?"ACTIVE":"STANDBY") : "DISABLED";
 
-    char buf[768];
-    int len=std::snprintf(buf,sizeof(buf),
-        "{\"channels\":["
-        "{\"name\":\"Ethernet W5500\",\"status\":\"%s\",\"label\":\"%s\",\"priority\":\"1\"},"
-        "{\"name\":\"GSM Air780E\",   \"status\":\"%s\",\"label\":\"%s\",\"priority\":\"2\"},"
-        "{\"name\":\"WiFi ESP8266\",  \"status\":\"%s\",\"label\":\"%s\",\"priority\":\"%s\"},"
-        "{\"name\":\"Iridium SBD\",   \"status\":\"%s\",\"label\":\"%s\",\"priority\":\"%s\"}"
-        "],"
-        "\"eth\":\"%s\",\"gsm\":\"%s\",\"wifi\":\"%s\",\"iridium\":\"%s\"}",
-        se,se, sg,sg, sw,sw,w?"3":"—", si,si,i?"4":"—",
-        se,sg,sw,si);
+    // Приоритет каждого канала — позиция в chain_order (1-based), "—" если disabled
+    char prio[4][4]; // "1".."4" или "—"
+    for(int i=0;i<4;i++) std::strncpy(prio[i],"—",sizeof(prio[i])-1);
+    for(int pos=0;pos<4;pos++){
+        int ci=(int)co[pos];
+        if(ci>=0&&ci<4&&en[ci]){
+            std::snprintf(prio[ci],sizeof(prio[ci]),"%d",pos+1);
+        }
+    }
+
+    // Имена каналов в порядке chain_order
+    const char* chNames[4]={"Ethernet W5500","GSM Air780E","WiFi ESP8266","Iridium SBD"};
+
+    char buf[896]; int len=0;
+    len += std::snprintf(buf+len,sizeof(buf)-len,"{\"channels\":[");
+    for(int pos=0;pos<4;pos++){
+        int ci=(int)co[pos];
+        if(ci<0||ci>3) ci=pos;
+        len += std::snprintf(buf+len,sizeof(buf)-len,
+            "%s{\"name\":\"%s\",\"status\":\"%s\",\"label\":\"%s\",\"priority\":\"%s\"}",
+            pos>0?",":"",
+            chNames[ci], status[ci], status[ci], prio[ci]);
+    }
+    len += std::snprintf(buf+len,sizeof(buf)-len,
+        "],\"eth\":\"%s\",\"gsm\":\"%s\",\"wifi\":\"%s\",\"iridium\":\"%s\"}",
+        status[0],status[1],status[2],status[3]);
     sendResponse(sn,200,"application/json",buf,(uint16_t)len);
 }
 
