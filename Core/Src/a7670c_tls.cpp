@@ -536,23 +536,28 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
         DBG.info("TLS CCH: HTTP in ack buf");
     }
     // Случай (a): пришёл CCHRECV URC — нужно запросить данные
+    // r[] уже содержит начало ответа (after-send buf прочитал первый чанк).
+    // НЕ делаем flush — копируем r[] в rx и дочитываем остаток.
     else if (std::strstr(r, "+CCHRECV:")) {
         int recvLen = 0;
         const char* rp = std::strstr(r, "DATA,");
         if (rp) std::sscanf(rp, "DATA,%*d,%d", &recvLen);
         if (recvLen > 0) {
+            // Шаг 1: копируем уже прочитанный буфер r[] в rx
+            used = (int)std::strlen(r);
+            if (used > (int)sizeof(rx) - 1) used = (int)sizeof(rx) - 1;
+            std::memcpy(rx, r, (size_t)used);
+            rx[used] = '\0';
+            // Шаг 2: дочитываем остаток из UART (без flush!) до финального OK
             std::snprintf(cmd, sizeof(cmd), "AT+CCHRECV=0,%d\r\n", recvLen);
-            m_modem.flushRx_pub();
             m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-            // Читаем всё что придёт от модема одним вызовом.
-            // waitFor с bsize=sizeof(rx) и маркером "\0" (никогда не сработает) —
-            // выход по 50мс паузе после последнего байта или таймаут 6с.
-            // Ответ содержит: "\r\nOK\r\n+CCHRECV: DATA,0,N\r\n<N байт>\r\nOK\r\n"
-            m_modem.waitFor_pub(rx, (uint16_t)(sizeof(rx)-1), "\r\nOK\r\n", 6000);
-            DBG.info("TLS CCH: raw recv len=%d hex0=%02X%02X%02X%02X [%.200s]",
-                 (int)std::strlen(rx),
-                 (uint8_t)rx[0],(uint8_t)rx[1],(uint8_t)rx[2],(uint8_t)rx[3], rx);
-            // Ищем HTTP/1. в любом месте буфера
+            uint16_t avail = (uint16_t)(sizeof(rx) - 1 - (uint16_t)used);
+            if (avail > 0) {
+                m_modem.waitFor_pub(rx + used, avail, "\r\nOK\r\n", 6000);
+                used = (int)std::strlen(rx);
+            }
+            DBG.info("TLS CCH: raw recv len=%d [%.200s]", used, rx);
+            // Ищем HTTP/1. в любом месте объединённого буфера
             const char* hstart = std::strstr(rx, "HTTP/1.");
             if (hstart) {
                 int hl = (int)std::strlen(hstart);
