@@ -273,8 +273,16 @@ int A7670CTls::connect(const char* host, uint16_t port)
     // по маркеру или таймауту 18с.
     {
         char cipBuf[256] = {};
+        // waitForUrc_pub останавливается на маркере "+CIPOPEN:" не дочитав числа.
+        // Дочитываем "\r\n" чтобы получить полный URC: "+CIPOPEN: 0,0\r\n"
         m_modem.waitForUrc_pub(cipBuf, sizeof(cipBuf), "+CIPOPEN:", 18000);
-
+        {
+            uint16_t already = (uint16_t)std::strlen(cipBuf);
+            if (already < sizeof(cipBuf) - 1)
+                m_modem.waitFor_pub(cipBuf + already,
+                                    (uint16_t)(sizeof(cipBuf) - already - 1),
+                                    "\r\n", 500);
+        }
         DBG.info("TLS: CIPOPEN raw [%.80s]", cipBuf);
         if (!std::strstr(cipBuf, "+CIPOPEN:")) {
             DBG.error("TLS: CIPOPEN no URC, raw=[%.80s]", cipBuf);
