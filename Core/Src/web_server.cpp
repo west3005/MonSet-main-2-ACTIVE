@@ -87,7 +87,7 @@ static bool w5500_send(uint8_t sn, const uint8_t* buf, uint16_t len){
     if(!len) return true;
     uint16_t sent = 0;
     while(sent < len){
-        // Ждём хоть какого-то свободного места в TX FIFO (не обязательно весь чанк)
+        // Ждём хоть какого-то свободного места в TX FIFO
         uint32_t t0 = HAL_GetTick();
         uint16_t fsr = 0;
         while((fsr = getSn_TX_FSR(sn)) == 0){
@@ -99,11 +99,21 @@ static bool w5500_send(uint8_t sn, const uint8_t* buf, uint16_t len){
             IWDG->KR = 0xAAAA;
             HAL_Delay(2);
         }
-        // Отправляем столько сколько влезает прямо сейчас
         uint16_t now = len - sent;
         if(now > fsr) now = fsr;
-        send(sn, (uint8_t*)(buf + sent), now);
-        sent += now;
+        // send() может вернуть SOCK_BUSY если предыдущая команда не завершена
+        int32_t ret = send(sn, (uint8_t*)(buf + sent), now);
+        if(ret == (int32_t)SOCK_BUSY){
+            // Ждём завершения предыдущей TX команды и повторяем
+            IWDG->KR = 0xAAAA;
+            HAL_Delay(2);
+            continue; // не двигаем sent — повторяем тот же кусок
+        }
+        if(ret <= 0){
+            DBG.warn("WebServer: send() err=%d sn=%u", (int)ret, (unsigned)sn);
+            return false;
+        }
+        sent += (uint16_t)ret;
     }
     return true;
 }
