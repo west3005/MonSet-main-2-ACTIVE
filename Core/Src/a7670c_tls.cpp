@@ -415,11 +415,25 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
     }
     DBG.info("TLS CCH: CCHSTART OK");
 
-    // --- Открываем SSL соединение ---
-    // AT+CCHOPEN=<session>,<host>,<port>,<ssl_type>
-    // ssl_type=0: не проверяем сертификат (VERIFY_NONE)
+    // --- Настраиваем SSL контекст (ctx 0) ---
+    // ignorertctime: игнорировать RTC при проверке срока сертификата
     m_modem.flushRx_pub();
-    std::snprintf(cmd, sizeof(cmd), "AT+CCHOPEN=0,\"%s\",%u,0\r\n", u.host, (unsigned)u.port);
+    m_modem.sendRaw_pub("AT+CSSLCFG=\"ignorertctime\",0,1\r\n", 31);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    // sslversion: 4 = все версии (SSL3/TLS1.0/1.1/1.2)
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CSSLCFG=\"sslversion\",0,4\r\n", 28);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    // Привязываем SSL контекст 0 к CCH сессии 0
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CCHSSLCFG=0,0\r\n", 19);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    DBG.info("TLS CCH: SSL ctx configured");
+
+    // --- Открываем SSL соединение ---
+    // AT+CCHOPEN=<session>,<host>,<port>  (без ssl_type — задан через CCHSSLCFG)
+    m_modem.flushRx_pub();
+    std::snprintf(cmd, sizeof(cmd), "AT+CCHOPEN=0,\"%s\",%u\r\n", u.host, (unsigned)u.port);
     m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
     DBG.info("TLS CCH: CCHOPEN %s:%u ...", u.host, (unsigned)u.port);
     // Ответ: +CCHOPEN: 0,0 (успех) или +CCHOPEN: 0,<err>
