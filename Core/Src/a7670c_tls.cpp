@@ -416,13 +416,21 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
     DBG.info("TLS CCH: CCHSTART OK");
 
     // --- Настраиваем SSL контекст (ctx 0) ---
-    // ignorertctime: игнорировать RTC при проверке срока сертификата
-    m_modem.flushRx_pub();
-    m_modem.sendRaw_pub("AT+CSSLCFG=\"ignorertctime\",0,1\r\n", 31);
-    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
-    // sslversion: 4 = все версии (SSL3/TLS1.0/1.1/1.2)
+    // sslversion: 4 = TLS (auto-negotiate)
     m_modem.flushRx_pub();
     m_modem.sendRaw_pub("AT+CSSLCFG=\"sslversion\",0,4\r\n", 28);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    // authmode: 0 = no auth (без проверки CA сертификата)
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CSSLCFG=\"authmode\",0,0\r\n", 27);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    // ignorelocaltime: игнорировать локальное время при проверке сертификата
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CSSLCFG=\"ignorelocaltime\",0,1\r\n", 34);
+    m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
+    // enableSNI: 1 = включить SNI (требуется для hostname-based серверов)
+    m_modem.flushRx_pub();
+    m_modem.sendRaw_pub("AT+CSSLCFG=\"enableSNI\",0,1\r\n", 29);
     m_modem.waitFor_pub(r, sizeof(r), "OK", 2000);
     // Привязываем SSL контекст 0 к CCH сессии 0
     m_modem.flushRx_pub();
