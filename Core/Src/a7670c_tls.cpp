@@ -139,9 +139,12 @@ int A7670CTls::modemWriteRaw(const uint8_t* buf, uint16_t len)
         m_modem.flushRx_pub();
         m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
 
-        m_modem.waitFor_pub(r, sizeof(r), ">", 3000);
+        // A7670C: после AT+CIPSEND сначала шлёт "OK\r\n", потом ">"
+        // waitFor_pub останавливается на 50мс паузе — используем waitForUrc_pub
+        m_modem.waitForUrc_pub(r, sizeof(r), ">", 5000);
         if (!std::strstr(r, ">")) {
-            DBG.error("TLS BIO: нет prompt \'>\'  для CIPSEND (chunk=%u)", (unsigned)chunk);
+            DBG.error("TLS BIO: no CIPSEND prompt, chunk=%u raw=[%.40s]",
+                      (unsigned)chunk, r);
             return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
         }
 
