@@ -297,7 +297,10 @@ GsmStatus A7670C::init()
 void A7670C::disconnect()
 {
     char r[64];
-    sendCommand("+CSOCL=0", r, sizeof(r), 2000);
+    // AT+CIPCLOSE — закрыть TCP сокет (CIPOPEN стек)
+    sendCommand("+CIPCLOSE=0", r, sizeof(r), 2000);
+    // AT+NETCLOSE — закрыть TCP/IP стек
+    sendCommand("+NETCLOSE", r, sizeof(r), 3000);
     sendCommand("+CGACT=0,1", r, sizeof(r), 5000);
     DBG.info("A7670C: отключён");
 }
