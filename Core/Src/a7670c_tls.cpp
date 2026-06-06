@@ -556,7 +556,7 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
                 m_modem.waitFor_pub(rx + used, avail, "\r\nOK\r\n", 6000);
                 used = (int)std::strlen(rx);
             }
-            DBG.info("TLS CCH: raw recv len=%d [%.200s]", used, rx);
+            DBG.info("TLS CCH: raw recv len=%d", used);
             // Ищем HTTP/1. в любом месте объединённого буфера
             const char* hstart = std::strstr(rx, "HTTP/1.");
             if (hstart) {
