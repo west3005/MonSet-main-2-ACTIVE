@@ -125,24 +125,20 @@ void App::runTestSend() {
     }
 
     m_testState = TestSendState::Sending;
-    /* Определяем приоритетный канал по chain_order из конфига */
-    { const RuntimeConfig& _c = Cfg();
-      const char* _chName[4] = {"eth", "gsm", "wifi", "iridium"};
-      bool _chEn[4] = {_c.eth_enabled, _c.gsm_enabled, _c.wifi_enabled, _c.iridium_enabled};
-      std::strncpy(m_testChannel, "none", sizeof(m_testChannel)-1);
-      for(int _i = 0; _i < 4; _i++){
-          int _ci = (int)_c.chain_order[_i];
-          if(_ci >= 0 && _ci < 4 && _chEn[_ci]){
-              std::strncpy(m_testChannel, _chName[_ci], sizeof(m_testChannel)-1);
-              break;
-          }
-      }
-      m_testChannel[sizeof(m_testChannel)-1] = '\0'; }
+    std::strncpy(m_testChannel, "sending...", sizeof(m_testChannel)-1);
+    m_testChannel[sizeof(m_testChannel)-1] = '\0';
 
     bool prevWebExclusive = g_web_exclusive;
     g_web_exclusive = false;
     SendResult result = m_channelMgr.sendData(payload, (uint16_t)plen);
     g_web_exclusive = prevWebExclusive;
+
+    // Реальный канал — тот, через который sendData фактически отправила
+    { const char* _chName[4] = {"eth", "gsm", "wifi", "iridium"};
+      uint8_t _ci = (uint8_t)m_channelMgr.getLastSentChannel();
+      const char* _name = (_ci < 4) ? _chName[_ci] : "unknown";
+      std::strncpy(m_testChannel, _name, sizeof(m_testChannel)-1);
+      m_testChannel[sizeof(m_testChannel)-1] = '\0'; }
     m_testElapsedMs = (uint32_t)(HAL_GetTick() - start);
 
     if (result == SendResult::Ok) {
