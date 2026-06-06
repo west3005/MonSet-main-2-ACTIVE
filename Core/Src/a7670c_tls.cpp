@@ -544,21 +544,18 @@ int A7670CTls::httpsPost(const char* url, const char* json, uint16_t jsonLen)
             std::snprintf(cmd, sizeof(cmd), "AT+CCHRECV=0,%d\r\n", recvLen);
             m_modem.flushRx_pub();
             m_modem.sendRaw_pub(cmd, (uint16_t)std::strlen(cmd));
-            // Ждём "HTTP/1." — полный ответ без усечения по \r\n\r\n
-            m_modem.waitFor_pub(rx, (uint16_t)(sizeof(rx) - 1), "HTTP/1.", 5000);
-            // Дочитываем строку статуса (ещё 20 байт)
-            {
-                uint16_t got = (uint16_t)std::strlen(rx);
-                if (got < sizeof(rx) - 21)
-                    m_modem.waitFor_pub(rx + got, 20, "\r\n", 500);
-            }
-            // Ищем HTTP/1. в буфере (может быть не в начале)
+            // Читаем весь ответ до финального "OK\r\n"
+            // Формат: "+CCHRECV: DATA,0,N\r\n<N байт>\r\nOK\r\n"
+            m_modem.waitFor_pub(rx, (uint16_t)(sizeof(rx) - 1), "OK\r\n", 5000);
+            DBG.info("TLS CCH: raw recv [%.80s]", rx);
+            // Ищем HTTP/1. в любом месте буфера
             const char* hstart = std::strstr(rx, "HTTP/1.");
-            if (hstart && hstart != rx) {
+            if (hstart) {
                 int hl = (int)std::strlen(hstart);
                 std::memmove(rx, hstart, (size_t)hl + 1);
                 used = hl;
             } else {
+                // HTTP не найден — сохраняем всё что есть для диагностики
                 used = (int)std::strlen(rx);
             }
             DBG.info("TLS CCH: CCHRECV data [%.60s]", rx);
