@@ -55,6 +55,7 @@ private:
     mbedtls_x509_crt       m_cacert;
 
     int  modemWriteRaw(const uint8_t* buf, uint16_t len);
+    void cchClose();
     int  modemReadRaw(uint8_t* buf, uint16_t len);
 
     static int biosend(void* ctx, const unsigned char* buf, size_t len);
