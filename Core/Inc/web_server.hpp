@@ -74,7 +74,7 @@ private:
      * Если увеличишь TX буфер сокета 5 до 4KB в W5500 init —
      * можно поднять до 2048.
      */
-    static constexpr uint16_t TX_CHUNK_SIZE = 1024;
+    static constexpr uint16_t TX_CHUNK_SIZE = 512;
 
     char m_respBuf[RESP_BUF_SIZE];
 
