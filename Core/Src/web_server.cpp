@@ -4652,6 +4652,7 @@ void WebServer::handlePostConfig(uint8_t sn,const char* body){
     // Parse into backup object first; commit only after successful parse.
     // This avoids rollback copies around save path and keeps mutation localized.
     RuntimeConfig& tmp = CfgBackup();
+    tmp = Cfg();   // init from current config so unset fields keep their values
     if(tmp.loadFromJson(body,std::strlen(body))){
         bool sdSaved = tmp.saveToSd(RUNTIME_CONFIG_FILENAME);
         if (sdSaved) m_sdOk = true;
