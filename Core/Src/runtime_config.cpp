@@ -164,6 +164,10 @@ void RuntimeConfig::setDefaultsFromConfig() {
         d0.divider             = Config::SENSOR_DIVIDER;
         copyStr(d0.name, sizeof(d0.name), "Sensor_P0");
         copyStr(d0.unit, sizeof(d0.unit), "");
+        // Этап 4: по умолчанию порт 0 наследует legacy Config::METRIC_ID,
+        // чтобы payload содержал реальный UUID, а не человекочитаемое имя "Sensor_P0"
+        // (см. buildOceanPayload(): metricId = dev.metric_id ?: dev.name ?: fallback)
+        copyStr(d0.metric_id, sizeof(d0.metric_id), Config::METRIC_ID);
     }
 
     // ---- Порт 1: UART4, RS-485, выключен ----
