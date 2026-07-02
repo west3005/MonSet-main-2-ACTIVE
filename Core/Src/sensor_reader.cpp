@@ -44,6 +44,46 @@ float SensorReader::convertLegacy(uint16_t reg0, uint16_t reg1) {
 }
 
 // ================================================================
+// RTU device compatibility helpers
+// ================================================================
+namespace {
+
+bool buildEntryFromRtuDevice(uint8_t portIdx,
+                             const ModbusDeviceConfig& dev,
+                             ModbusRegEntry& entry) {
+    if (!dev.enabled) return false;
+
+    entry = ModbusRegEntry{};
+    entry.port_idx = portIdx;
+    entry.slave_id = dev.slave_id;
+    entry.function = dev.function;
+    entry.start_reg = dev.start_reg;
+    entry.count = dev.reg_count;
+    entry.data_type = dev.data_type;
+    entry.scale = dev.scale;
+    entry.zero_offset = dev.offset;
+    entry.multiplier = 1.0f;
+    std::strncpy(entry.unit, dev.unit, sizeof(entry.unit) - 1);
+    entry.unit[sizeof(entry.unit) - 1] = 0;
+    std::strncpy(entry.name, dev.metric_id, sizeof(entry.name) - 1);
+    entry.name[sizeof(entry.name) - 1] = 0;
+    return true;
+}
+
+uint8_t countRtuDevices(const RuntimeConfig& c) {
+    uint8_t total = 0;
+    for (uint8_t port = 0; port < MAX_RTU_PORTS; ++port) {
+        const auto& rtu = c.rtu_ports[port];
+        for (uint8_t dev = 0; dev < rtu.device_count; ++dev) {
+            if (rtu.devices[dev].enabled) ++total;
+        }
+    }
+    return total;
+}
+
+}
+
+// ================================================================
 // Read with averaging
 // ================================================================
 float SensorReader::readWithAveraging(ModbusRTU& port, const ModbusRegEntry& entry,
@@ -171,6 +211,40 @@ float SensorReader::read(DateTime& timestamp) {
         return m_lastValue;
     }
 
+    // --- Structured RTU device mode (JSON rtu[]) ---
+    if (countRtuDevices(c) > 0) {
+        for (uint8_t port = 0; port < MAX_RTU_PORTS && m_readingCount < MAX_SENSOR_READINGS; ++port) {
+            const auto& rtu = c.rtu_ports[port];
+            for (uint8_t dev = 0; dev < rtu.device_count && m_readingCount < MAX_SENSOR_READINGS; ++dev) {
+                ModbusRegEntry entry{};
+                if (!buildEntryFromRtuDevice(port, rtu.devices[dev], entry)) continue;
+
+                SensorReading& rdg = m_readings[m_readingCount];
+                rdg = SensorReading{};
+
+                if (readEntry(entry, rdg, timestamp)) {
+                    m_readingCount++;
+                } else {
+                    std::strncpy(rdg.name, entry.name, sizeof(rdg.name) - 1);
+                    rdg.name[sizeof(rdg.name) - 1] = 0;
+                    std::strncpy(rdg.unit, entry.unit, sizeof(rdg.unit) - 1);
+                    rdg.unit[sizeof(rdg.unit) - 1] = 0;
+                    rdg.valid = false;
+                    rdg.timestamp = timestamp;
+                    m_readingCount++;
+                }
+            }
+        }
+
+        for (uint8_t i = 0; i < m_readingCount; i++) {
+            if (m_readings[i].valid) {
+                m_lastValue = m_readings[i].value;
+                break;
+            }
+        }
+        return m_lastValue;
+    }
+
     // --- Legacy single-sensor mode ---
     uint16_t regs[2] = {0, 0};
 
@@ -186,9 +260,10 @@ float SensorReader::read(DateTime& timestamp) {
         m_lastValue = convertLegacy(regs[0], regs[1]);
         DBG.info("Modbus: [0x%04X,0x%04X] -> %.3f", regs[0], regs[1], m_lastValue);
 
-        // Populate reading[0] for uniform access
         SensorReading& rdg = m_readings[0];
+        rdg = SensorReading{};
         std::strncpy(rdg.name, c.metric_id, sizeof(rdg.name) - 1);
+        rdg.name[sizeof(rdg.name) - 1] = 0;
         rdg.value     = m_lastValue;
         rdg.raw_value = m_lastValue;
         rdg.unit[0]   = 0;
