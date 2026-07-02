@@ -44,46 +44,6 @@ float SensorReader::convertLegacy(uint16_t reg0, uint16_t reg1) {
 }
 
 // ================================================================
-// RTU device compatibility helpers
-// ================================================================
-namespace {
-
-bool buildEntryFromRtuDevice(uint8_t portIdx,
-                             const ModbusDeviceConfig& dev,
-                             ModbusRegEntry& entry) {
-    if (!dev.enabled) return false;
-
-    entry = ModbusRegEntry{};
-    entry.port_idx = portIdx;
-    entry.slave_id = dev.slave_id;
-    entry.function = dev.function;
-    entry.start_reg = dev.start_reg;
-    entry.count = dev.reg_count;
-    entry.data_type = dev.data_type;
-    entry.scale = dev.scale;
-    entry.zero_offset = dev.offset;
-    entry.multiplier = 1.0f;
-    std::strncpy(entry.unit, dev.unit, sizeof(entry.unit) - 1);
-    entry.unit[sizeof(entry.unit) - 1] = 0;
-    std::strncpy(entry.name, dev.metric_id, sizeof(entry.name) - 1);
-    entry.name[sizeof(entry.name) - 1] = 0;
-    return true;
-}
-
-uint8_t countRtuDevices(const RuntimeConfig& c) {
-    uint8_t total = 0;
-    for (uint8_t port = 0; port < MAX_RTU_PORTS; ++port) {
-        const auto& rtu = c.rtu_ports[port];
-        for (uint8_t dev = 0; dev < rtu.device_count; ++dev) {
-            if (rtu.devices[dev].enabled) ++total;
-        }
-    }
-    return total;
-}
-
-}
-
-// ================================================================
 // Read with averaging
 // ================================================================
 float SensorReader::readWithAveraging(ModbusRTU& port, const ModbusRegEntry& entry,
@@ -211,30 +171,40 @@ float SensorReader::read(DateTime& timestamp) {
         return m_lastValue;
     }
 
-    // --- Structured RTU device mode (JSON rtu[]) ---
-    if (countRtuDevices(c) > 0) {
-        for (uint8_t port = 0; port < MAX_RTU_PORTS && m_readingCount < MAX_SENSOR_READINGS; ++port) {
+    // --- Structured RTU device mode (JSON rtu[] via ModbusDeviceCfg) ---
+    // Использует существующий pollRtuPorts()/readModbusDevice() из
+    // sensor_reader_ext.cpp, который уже корректно применяет data_type
+    // (включая FLOAT32_BE), scale, divider и offset.
+    bool anyRtuDevice = false;
+    for (uint8_t port = 0; port < MAX_RTU_PORTS && !anyRtuDevice; ++port) {
+        const auto& rtu = c.rtu_ports[port];
+        if (!rtu.enabled) continue;
+        for (uint8_t dev = 0; dev < rtu.device_count; ++dev) {
+            if (rtu.devices[dev].enabled) { anyRtuDevice = true; break; }
+        }
+    }
+
+    if (anyRtuDevice) {
+        for (uint8_t i = 0; i < MAX_SENSOR_READINGS; ++i) {
+            m_readings[i] = SensorReading{};
+        }
+        m_readingCount = 0;
+
+        pollRtuPorts(c.rtu_ports, MAX_RTU_PORTS);
+
+        uint8_t maxIdx = 0;
+        for (uint8_t port = 0; port < MAX_RTU_PORTS; ++port) {
             const auto& rtu = c.rtu_ports[port];
-            for (uint8_t dev = 0; dev < rtu.device_count && m_readingCount < MAX_SENSOR_READINGS; ++dev) {
-                ModbusRegEntry entry{};
-                if (!buildEntryFromRtuDevice(port, rtu.devices[dev], entry)) continue;
-
-                SensorReading& rdg = m_readings[m_readingCount];
-                rdg = SensorReading{};
-
-                if (readEntry(entry, rdg, timestamp)) {
-                    m_readingCount++;
-                } else {
-                    std::strncpy(rdg.name, entry.name, sizeof(rdg.name) - 1);
-                    rdg.name[sizeof(rdg.name) - 1] = 0;
-                    std::strncpy(rdg.unit, entry.unit, sizeof(rdg.unit) - 1);
-                    rdg.unit[sizeof(rdg.unit) - 1] = 0;
-                    rdg.valid = false;
-                    rdg.timestamp = timestamp;
-                    m_readingCount++;
+            if (!rtu.enabled) continue;
+            for (uint8_t dev = 0; dev < rtu.device_count; ++dev) {
+                const auto& d = rtu.devices[dev];
+                if (d.enabled && d.channel_idx < MAX_SENSOR_READINGS) {
+                    m_readings[d.channel_idx].timestamp = timestamp;
+                    if (d.channel_idx + 1 > maxIdx) maxIdx = d.channel_idx + 1;
                 }
             }
         }
+        m_readingCount = maxIdx;
 
         for (uint8_t i = 0; i < m_readingCount; i++) {
             if (m_readings[i].valid) {
