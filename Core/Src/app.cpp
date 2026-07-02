@@ -365,9 +365,15 @@ static int httpPostPlainW5500(const char* url,const char* authB64,
 App::App()
     : m_rtc(&hi2c1)
     , m_modbusPort0(&huart3, PIN_RS485_DE_PORT, PIN_RS485_DE_PIN)
+    , m_modbusPorts{&m_modbusPort0, &m_modbusPort1, &m_modbusPort2}
+      ///< m_modbusPort1/2 default-constructed выше (объявлены раньше m_modbusPorts);
+      ///< configure() для них вызывается позже в init() при rtu_ports[N].enabled.
     , m_gsm(&huart2, PIN_SIM_PWR_PORT, PIN_SIM_PWR_PIN)
     , m_sdBackup()
-    , m_sensor(m_modbusPort0, m_rtc)
+    , m_sensor(m_modbusPorts, m_rtc)
+      ///< fix: используем 3-портовый конструктор SensorReader, иначе
+      ///< m_ports[1]/m_ports[2] оставались nullptr и UART4/UART5 не опрашивались
+      ///< даже при rtu_ports[1|2].enabled=true (см. sensor_reader.cpp::readEntry).
     , m_buffer()
     , m_power(&hrtc, m_sdBackup)
     , m_channelMgr()
@@ -379,9 +385,6 @@ App::App()
     , m_captivePortal()
     , m_battery()
 {
-    m_modbusPorts[0] = &m_modbusPort0;
-    m_modbusPorts[1] = &m_modbusPort1;
-    m_modbusPorts[2] = &m_modbusPort2;
     // Имена файлов бэкапа (дефолты); обновятся в setup() после loadFromSd()
     m_sdBackup.setFilename(Config::PORT0_BACKUP_FILE);
     m_sdBackup1.setFilename(Config::PORT1_BACKUP_FILE);
