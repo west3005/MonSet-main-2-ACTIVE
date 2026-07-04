@@ -207,6 +207,9 @@ private:
     void transmitBuffer();
     void transmitSingle(float value, const DateTime& dt);
     void retransmitBackup();
+    /// @brief true если существует хотя бы один файл бэкапа (общий backup.jsn
+    ///        или любой backup_ch{N}.jsn) — используется как гейт перед retransmitBackup().
+    bool anyBackupExists();
 
     // ---- Channel send callbacks ----
     static int sendViaEth(const char* json, uint16_t len, void* ctx);
