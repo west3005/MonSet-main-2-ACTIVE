@@ -244,6 +244,14 @@ struct ModbusDeviceCfg {
                                     ///< Пусто = использовать глобальный RuntimeConfig::metric_id
     uint8_t  send_interval_polls = 0; ///< Per-device send cadence override (0 = использовать глобальный)
     uint8_t  channel_idx   = 0;     ///< Destination channel index in the telemetry payload
+
+    // Этап 7: индивидуальный интервал ОПРОСА датчика (не отправки!).
+    // Аналог send_interval_polls, но применяется к самому modbus-запросу:
+    // устройство опрашивается раз в poll_interval_polls тиков главного цикла
+    // (тик = Cfg().poll_interval_sec). 1 = опрос каждый тик (обратная совместимость).
+    // Отправка (send) остаётся ОБЩЕЙ для всех датчиков — см. App::retransmitBackup(),
+    // которая вычитывает backup_ch{N}.jsn каждого датчика по Cfg().send_interval_polls.
+    uint16_t poll_interval_polls = 1;
 };
 
 // ================================================================
