@@ -166,11 +166,35 @@ void SensorReader::pollRtuPorts(const ModbusRtuPortConfig* rtu_ports,
             }
 
             float val = readModbusDevice(port, dev, pCfg);
+            bool valOk = (val > -9998.0f);
 
             SensorReading& slot = m_readings[dev.channel_idx];
-            slot.value = val;
-            slot.valid = (val > -9998.0f);
-            m_freshThisCycle[dev.channel_idx] = true;
+
+            // Этап 8: окно усреднения ПЕРЕД записью в backup — считается в
+            // реальных опросах этого датчика (avg_window_polls=1 = без
+            // усреднения, обратная совместимость с поведением до Этапа 8).
+            const uint16_t avgWindow = (dev.avg_window_polls == 0) ? 1u : dev.avg_window_polls;
+            if (avgWindow <= 1) {
+                slot.value = val;
+                slot.valid = valOk;
+                m_freshThisCycle[dev.channel_idx] = true;
+            } else if (valOk) {
+                float&    sum = m_avgSum[dev.channel_idx];
+                uint16_t& cnt = m_avgSampleCount[dev.channel_idx];
+                sum += val;
+                cnt++;
+                if (cnt >= avgWindow) {
+                    slot.value = sum / (float)cnt;
+                    slot.valid = true;
+                    m_freshThisCycle[dev.channel_idx] = true;
+                    sum = 0.0f;
+                    cnt = 0;
+                }
+                // Иначе накопитель ещё не полон — слот не трогаем, fresh не ставим,
+                // предыдущее усреднённое значение (если было) остаётся в payload.
+            }
+            // valOk==false и avgWindow>1: ошибочное измерение не портит накопитель
+            // усреднения — просто пропускаем этот отсчёт.
 
             // Этап 4: приоритет per-device metric_id над именем устройства
             // Аналог ocean-station: fields[].metric_id → payload metricId
