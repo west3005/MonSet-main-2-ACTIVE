@@ -186,6 +186,14 @@ private:
     void checkWebTimeout();
 
     /**
+     * @brief Write measurement to backup (m_devBackup, общий backup.jsn) with
+     *        "src":"web_q" tag — используется при постановке измерения в очередь
+     *        во время активной веб-сессии (см. app_web.cpp).
+     * @param payload  JSON string to write
+     */
+    void writeToBackup(const char* payload);
+
+    /**
      * @brief Execute test send synchronously (called when m_testState==Reading).
      */
     void runTestSend();
