@@ -121,6 +121,12 @@ float SensorReader::readModbusDevice(ModbusRTU& port,
 
 void SensorReader::pollRtuPorts(const ModbusRtuPortConfig* rtu_ports,
                                  uint8_t portCount) {
+    // Этап 7: сбрасываем флаг "свежести" каждый цикл — устанавливается заново
+    // только для каналов, которые реально были опрошены в этом вызове.
+    for (uint8_t i = 0; i < MAX_SENSOR_READINGS; ++i) {
+        m_freshThisCycle[i] = false;
+    }
+
     for (uint8_t p = 0; p < portCount && p < MAX_RTU_PORTS; ++p) {
         const ModbusRtuPortConfig& pCfg = rtu_ports[p];
 
@@ -138,6 +144,21 @@ void SensorReader::pollRtuPorts(const ModbusRtuPortConfig* rtu_ports,
             if (!dev.enabled) {
                 continue;
             }
+            if (dev.channel_idx >= MAX_SENSOR_READINGS) {
+                continue;
+            }
+
+            // Этап 7: индивидуальный интервал опроса — "тики" главного цикла.
+            // 1 = опрос каждый тик (обратная совместимость с поведением до Этапа 7).
+            const uint16_t interval = (dev.poll_interval_polls == 0) ? 1u : dev.poll_interval_polls;
+            uint16_t& counter = m_pollCounters[dev.channel_idx];
+            counter++;
+            if (counter < interval) {
+                // Не время опроса этого устройства — не трогаем шину, слот
+                // сохраняет предыдущее значение (valid не меняется).
+                continue;
+            }
+            counter = 0;
 
             // Inter-frame delay before each transaction
             if (pCfg.inter_frame_ms > 0) {
@@ -146,22 +167,21 @@ void SensorReader::pollRtuPorts(const ModbusRtuPortConfig* rtu_ports,
 
             float val = readModbusDevice(port, dev, pCfg);
 
-            if (dev.channel_idx < MAX_SENSOR_READINGS) {
-                SensorReading& slot = m_readings[dev.channel_idx];
-                slot.value = val;
-                slot.valid = (val > -9998.0f);
+            SensorReading& slot = m_readings[dev.channel_idx];
+            slot.value = val;
+            slot.valid = (val > -9998.0f);
+            m_freshThisCycle[dev.channel_idx] = true;
 
-                // Этап 4: приоритет per-device metric_id над именем устройства
-                // Аналог ocean-station: fields[].metric_id → payload metricId
-                // Если metric_id непустой — он идёт в slot.name и затем в payload
-                // Если пустой — используется dev.name (как раньше, обратная совместимость)
-                const char* mid = (dev.metric_id[0] != '\0') ? dev.metric_id : dev.name;
-                std::strncpy(slot.name, mid, sizeof(slot.name) - 1);
-                slot.name[sizeof(slot.name) - 1] = '\0';
+            // Этап 4: приоритет per-device metric_id над именем устройства
+            // Аналог ocean-station: fields[].metric_id → payload metricId
+            // Если metric_id непустой — он идёт в slot.name и затем в payload
+            // Если пустой — используется dev.name (как раньше, обратная совместимость)
+            const char* mid = (dev.metric_id[0] != '\0') ? dev.metric_id : dev.name;
+            std::strncpy(slot.name, mid, sizeof(slot.name) - 1);
+            slot.name[sizeof(slot.name) - 1] = '\0';
 
-                std::strncpy(slot.unit, dev.unit, sizeof(slot.unit) - 1);
-                slot.unit[sizeof(slot.unit) - 1] = '\0';
-            }
+            std::strncpy(slot.unit, dev.unit, sizeof(slot.unit) - 1);
+            slot.unit[sizeof(slot.unit) - 1] = '\0';
         }
     }
 }
