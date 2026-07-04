@@ -146,6 +146,9 @@ float SensorReader::read(DateTime& timestamp) {
 
     // --- Multi-sensor mode (modbus_map configured) ---
     if (c.modbus_map_count > 0) {
+        // Этап 7: legacy modbus_map режим не поддерживает per-device poll_interval_polls —
+        // опрашивается целиком каждый тик, поэтому все каналы считаются "свежими".
+        for (uint8_t i = 0; i < MAX_SENSOR_READINGS; ++i) m_freshThisCycle[i] = false;
         for (uint8_t i = 0; i < c.modbus_map_count && i < MAX_SENSOR_READINGS; i++) {
             SensorReading& rdg = m_readings[m_readingCount];
             rdg = SensorReading{}; // reset
@@ -159,6 +162,7 @@ float SensorReader::read(DateTime& timestamp) {
                 rdg.timestamp = timestamp;
                 m_readingCount++;
             }
+            m_freshThisCycle[i] = true;
         }
 
         // Return first valid reading for backward compat
@@ -240,6 +244,7 @@ float SensorReader::read(DateTime& timestamp) {
         regs
     );
 
+    m_freshThisCycle[0] = false;
     if (status == ModbusStatus::Ok) {
         m_lastValue = convertLegacy(regs[0], regs[1]);
         DBG.info("Modbus: [0x%04X,0x%04X] -> %.3f", regs[0], regs[1], m_lastValue);
@@ -254,6 +259,8 @@ float SensorReader::read(DateTime& timestamp) {
         rdg.valid     = true;
         rdg.timestamp = timestamp;
         m_readingCount = 1;
+        // Этап 7: legacy single-sensor режим — опрашивается каждый тик безусловно.
+        m_freshThisCycle[0] = true;
     } else {
         DBG.error("Modbus: error %d", static_cast<int>(status));
     }
