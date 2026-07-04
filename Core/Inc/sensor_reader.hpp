@@ -108,6 +108,14 @@ private:
     uint16_t m_pollCounters[MAX_SENSOR_READINGS]    = {};
     bool     m_freshThisCycle[MAX_SENSOR_READINGS]  = {};
 
+    // Этап 8: окно усреднения ПЕРЕД записью в backup — накопитель на канал.
+    // m_avgSum/m_avgSampleCount копят реальные измерения датчика; когда
+    // m_avgSampleCount[ci] достигает dev.avg_window_polls — вычисляется среднее,
+    // кладётся в m_readings[ci].value, накопитель сбрасывается, m_freshThisCycle
+    // выставляется true (сигнал для App::run() записать усреднённое в backup).
+    float    m_avgSum[MAX_SENSOR_READINGS]         = {};
+    uint16_t m_avgSampleCount[MAX_SENSOR_READINGS] = {};
+
     /// Legacy single-sensor convert (backward compat)
     static float convertLegacy(uint16_t reg0, uint16_t reg1);
 
