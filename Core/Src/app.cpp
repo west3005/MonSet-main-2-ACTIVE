@@ -858,36 +858,17 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
         m_pollCounter++;
         if (m_pollCounter >= Cfg().send_interval_polls) {
             m_pollCounter = 0;
-            int jsonLen;
-            if (m_sensor.getReadingCount() > 1 || Cfg().modbus_map_count > 0)
-                jsonLen = buildMultiSensorPayload(m_json, sizeof(m_json), tsStr, ts, true);
-            else
-                jsonLen = buildPayload(m_json, sizeof(m_json), tsStr, val, ts, true);
-
-            if (jsonLen > 0 && jsonLen < (int)sizeof(m_json)) {
-                // FIX: не трогаем W5500 сокеты пока веб активен
-                if (m_webActive) {
-                    DBG.info("[WEB_ACTIVE] send skipped, data queued to backup");
-                    // Комбинированный multi-metric payload — общий backup.jsn,
-                    // не привязан к одному каналу (см. per-channel запись выше).
-                    if (m_sdOk) { m_devBackup.setFilename(Config::BACKUP_FILENAME); m_devBackup.appendLine(m_json); }
-                } else {
-                    SendResult result = m_channelMgr.sendData(m_json, (uint16_t)jsonLen);
-                    m_channelAlive = (result == SendResult::Ok);
-                    if (result == SendResult::Ok) {
-                        DBG.info("Data sent OK");
-                        // Этап 2: сброс буферов усреднения после успешной отправки
-                        // Аналог ocean-station: value_buffer.clear()
-                        avgClearAll();
-                    } else if (result == SendResult::SavedBackup) {
-                        DBG.warn("Data saved to backup");
-                        // Сбрасываем буфер и при сохранении в backup — данные уже записаны
-                        avgClearAll();
-                    } else {
-                        DBG.error("Data send FAILED");
-                        // Буфер НЕ сбрасываем при ошибке — накапливаем дальше
-                    }
-                }
+            // Этап 8: усреднение теперь происходит ДО записи в backup_ch{N}.jsn
+            // (см. sensor_reader_ext.cpp::pollRtuPorts(), avg_window_polls) —
+            // отправка просто перегоняет все накопленные за интервал усреднённые
+            // записи через retransmitBackup(), а не строит live-payload из
+            // мгновенных значений датчиков.
+            if (m_webActive) {
+                DBG.info("[WEB_ACTIVE] send skipped, backup will be retransmitted later");
+            } else {
+                retransmitBackup();
+                // Software watchdog: считаем канал живым, если хотя бы один активен
+                m_channelAlive = (m_channelMgr.activeCount() > 0);
             }
         }
 
