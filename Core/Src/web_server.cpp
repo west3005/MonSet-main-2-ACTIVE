@@ -4478,14 +4478,15 @@ void WebServer::handleApiConfig(uint8_t sn){
                 "\"rs\":%u,\"rc\":%u,\"dt\":\"%s\","
                 "\"sc\":%f,\"of\":%f,\"dv\":%f,"
                 "\"un\":\"%s\",\"ci\":%u,"
-                "\"mi\":\"%s\",\"si\":%u}",
+                "\"mi\":\"%s\",\"si\":%u,\"pi\":%u,\"aw\":%u}",
                 j==0?"":",",
                 d.enabled?"true":"false",
                 (unsigned)d.slave_addr, d.name, (unsigned)d.func_code,
                 (unsigned)d.reg_start, (unsigned)d.reg_count, dtStr,
                 (double)d.scale, (double)d.offset, (double)d.divider,
                 d.unit, (unsigned)d.channel_idx,
-                d.metric_id, (unsigned)d.send_interval_polls
+                d.metric_id, (unsigned)d.send_interval_polls,
+                (unsigned)d.poll_interval_polls, (unsigned)d.avg_window_polls
             );
         }
         n += std::snprintf(m_respBuf+n, RESP_BUF_SIZE-n, "]}");
