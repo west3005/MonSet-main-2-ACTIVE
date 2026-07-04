@@ -185,10 +185,24 @@ float SensorReader::read(DateTime& timestamp) {
     }
 
     if (anyRtuDevice) {
-        for (uint8_t i = 0; i < MAX_SENSOR_READINGS; ++i) {
-            m_readings[i] = SensorReading{};
+        // Этап 7: НЕ обнуляем m_readings целиком — "медленные" датчики
+        // (poll_interval_polls > 1) должны сохранять последнее валидное
+        // значение между своими реальными опросами, иначе backup получит
+        // невалидные/нулевые записи на тиках, где опрос был пропущен.
+        // Обнуляем только слоты устройств, которые СКОНФИГУРИРОВАНЫ, но
+        // выключены (enabled=false) или их порт выключен — иначе устаревшее
+        // значение отключённого датчика будет висеть в payload бесконечно.
+        // ВАЖНО: неиспользуемые слоты devices[dev >= device_count] имеют
+        // channel_idx=0 по умолчанию — их трогать нельзя, иначе затрём канал 0.
+        for (uint8_t port = 0; port < MAX_RTU_PORTS; ++port) {
+            const auto& rtuChk = c.rtu_ports[port];
+            for (uint8_t dev = 0; dev < rtuChk.device_count && dev < ModbusRtuPortConfig::MAX_DEVICES; ++dev) {
+                const auto& dChk = rtuChk.devices[dev];
+                if ((!rtuChk.enabled || !dChk.enabled) && dChk.channel_idx < MAX_SENSOR_READINGS) {
+                    m_readings[dChk.channel_idx] = SensorReading{};
+                }
+            }
         }
-        m_readingCount = 0;
 
         pollRtuPorts(c.rtu_ports, MAX_RTU_PORTS);
 
