@@ -494,6 +494,11 @@ static void parseRtuDeviceCfg(const char* obj, ModbusDeviceCfg& d) {
     // аналог ocean-station fields[].metric_id и send_interval_sec
     jsonGetString(obj, "mi", d.metric_id, sizeof(d.metric_id));
     jsonGetU8  (obj, "si", d.send_interval_polls);
+    // Этап 7/8: индивидуальный интервал опроса и окно усреднения перед backup
+    jsonGetU16 (obj, "pi", d.poll_interval_polls);
+    if (d.poll_interval_polls == 0) d.poll_interval_polls = 1; // защита от деления/зависания
+    jsonGetU16 (obj, "aw", d.avg_window_polls);
+    if (d.avg_window_polls == 0) d.avg_window_polls = 1;
     char dtStr[16]{};
     if (jsonGetString(obj, "dt", dtStr, sizeof(dtStr)))
         d.data_type = strToDt(dtStr);
@@ -1204,7 +1209,7 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
                 "%s{\"en\":%s,\"sa\":%u,\"nm\":\"%s\",\"fc\":%u,"
                 "\"rs\":%u,\"rc\":%u,\"dt\":\"%s\","
                 "\"sc\":%f,\"of\":%f,\"dv\":%f,\"un\":\"%s\",\"ci\":%u,"
-                "\"mi\":\"%s\",\"si\":%u}",
+                "\"mi\":\"%s\",\"si\":%u,\"pi\":%u,\"aw\":%u}",
                 j==0?"":",",
                 d.enabled?"true":"false",
                 (unsigned)d.slave_addr, d.name, (unsigned)d.func_code,
@@ -1212,7 +1217,8 @@ bool RuntimeConfig::saveToSd(const char* filename) const {
                 dtToStr(d.data_type),
                 (double)d.scale, (double)d.offset, (double)d.divider,
                 d.unit, (unsigned)d.channel_idx,
-                d.metric_id, (unsigned)d.send_interval_polls);
+                d.metric_id, (unsigned)d.send_interval_polls,
+                (unsigned)d.poll_interval_polls, (unsigned)d.avg_window_polls);
             if (n<0||n>=(int)sizeof(json)) goto overflow;
         }
         n += std::snprintf(json+n,sizeof(json)-n,"]}");
