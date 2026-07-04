@@ -83,6 +83,18 @@ public:
      */
     void pollRtuPorts(const ModbusRtuPortConfig* rtu_ports, uint8_t portCount);
 
+    /**
+     * @brief Этап 7: true если показание канала было СВЕЖИМ (реально опрошено)
+     *        именно в последнем вызове pollRtuPorts()/read(). Используется
+     *        в App::run() как гейт перед записью в backup_ch{N}.jsn — иначе
+     *        "медленные" датчики (poll_interval_polls > 1) дублировали бы
+     *        одно и то же старое значение в бэкап на каждом тике.
+     * @param channelIdx Индекс канала (== dev.channel_idx)
+     */
+    bool isFreshThisCycle(uint8_t channelIdx) const {
+        return (channelIdx < MAX_SENSOR_READINGS) ? m_freshThisCycle[channelIdx] : false;
+    }
+
 private:
     ModbusRTU* m_ports[3] = {nullptr, nullptr, nullptr};
     DS3231&    m_rtc;
@@ -90,6 +102,11 @@ private:
 
     SensorReading m_readings[MAX_SENSOR_READINGS];
     uint8_t       m_readingCount = 0;
+
+    // Этап 7: персональные счётчики опроса на канал (индекс == channel_idx)
+    // и флаг "было ли реально опрошено в этом цикле" (для гейта записи бэкапа).
+    uint16_t m_pollCounters[MAX_SENSOR_READINGS]    = {};
+    bool     m_freshThisCycle[MAX_SENSOR_READINGS]  = {};
 
     /// Legacy single-sensor convert (backward compat)
     static float convertLegacy(uint16_t reg0, uint16_t reg1);
