@@ -807,13 +807,16 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
         ledBlink(1, 50);
 
         if (m_sdOk) {
-            // Этап 5: свой файл бэкапа на каждый датчик (backup_ch{channel_idx}.jsn),
-            // а не один общий файл на всё устройство.
+            // Этап 5: свой файл бэкапа на каждый датчик (backup_ch{channel_idx}.jsn).
+            // Этап 7: пишем ТОЛЬКО свежие показания (isFreshThisCycle) — иначе
+            // "медленные" датчики (poll_interval_polls > 1) дублировали бы одно
+            // и то же старое значение в бэкап на каждом тике главного цикла.
             uint8_t rdCnt = m_sensor.getReadingCount();
             char line[Config::JSONL_LINE_MAX];
             bool anyWriteFail = false;
             if (rdCnt > 0) {
                 for (uint8_t ci = 0; ci < rdCnt; ci++) {
+                    if (!m_sensor.isFreshThisCycle(ci)) continue;
                     const SensorReading& rd = m_sensor.getReading(ci);
                     if (!rd.valid) continue;
                     int l = buildChannelPayload(line, sizeof(line), tsStr, ts, rd);
@@ -826,7 +829,7 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
                         anyWriteFail = true;
                     }
                 }
-            } else {
+            } else if (m_sensor.isFreshThisCycle(0)) {
                 // Legacy fallback: нет multi-sensor readings — один канал 0
                 int l = buildPayload(line, sizeof(line), tsStr, val, ts, false);
                 if (l > 0 && l < (int)sizeof(line)) {
