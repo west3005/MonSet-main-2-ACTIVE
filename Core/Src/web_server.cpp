@@ -4912,11 +4912,11 @@ void WebServer::handleRequest(uint8_t sn,const char* request,uint16_t reqLen){
     if(m_activityCb) m_activityCb(m_activityCtx);
     if(m_app) m_app->notifyWebActivity();
 
-    char method[8]{},path[64]{};
-    std::sscanf(request,"%7s %63s",method,path);
+    char method[8]{},path[160]{};
+    std::sscanf(request,"%7s %159s",method,path);
     DBG.info("WebServer: %s %s",method,path);
 
-    char cleanPath[64]; std::strncpy(cleanPath,path,sizeof(cleanPath)-1);
+    char cleanPath[160]; std::strncpy(cleanPath,path,sizeof(cleanPath)-1);
     char* qs=std::strchr(cleanPath,'?'); if(qs)*qs='\0';
     const char* queryStr=qs?(std::strchr(path,'?')+1):"";
 
@@ -5028,7 +5028,7 @@ void WebServer::handleFiles(uint8_t sn){
 
 // GET /api/files?path=0:/  — JSON список файлов/папок
 void WebServer::handleApiFiles(uint8_t sn, const char* queryStr, const char* /*request*/){
-    char dirPath[64]="0:/";
+    char dirPath[160]="0:/";
     getQueryParam(queryStr,"path",dirPath,sizeof(dirPath));
     // FatFS не принимает "/" как корень — маппируем на "0:/"
     if(std::strcmp(dirPath,"/")==0 || dirPath[0]=='\0') std::strncpy(dirPath,"0:/",sizeof(dirPath));
@@ -5103,8 +5103,8 @@ void WebServer::handleApiDownload(uint8_t sn, const char* queryStr, const char* 
 void WebServer::handleApiUpload(uint8_t sn, const char* body, const char* request){
     char filePath[128]="";
     // Извлекаем path из строки запроса (не из тела)
-    char method[8]{}, urlBuf[128]{};
-    std::sscanf(request,"%7s %127s",method,urlBuf);
+    char method[8]{}, urlBuf[160]{};
+    std::sscanf(request,"%7s %159s",method,urlBuf);
     const char* qs=std::strchr(urlBuf,'?');
     if(qs) qs++;
     if(!qs||!getQueryParam(qs,"path",filePath,sizeof(filePath))||!filePath[0]){
