@@ -382,8 +382,8 @@ Iridium SBD
 | `SDIO_CMD` | **PD2** | Command |
 | `SDIO_D0` | **PC8** | Data 0 (1-bit mode) |
 
-> Режим: **1-bit SDIO**, файловая система FAT32 через FatFS  
-> ClockDiv = 2 → эффективная тактовая SD ≈ 6 MHz  
+> Режим инициализации: **1-bit SDIO** → после успешного старта переход в **4-bit SDIO**, файловая система FAT32 через FatFS  
+> Тактирование SD настраивается в коде и конфигурации периферии  
 > При сбросе по IWDG/WWDG/Software — SD отключается на текущий запуск (`g_sd_disabled = true`)
 
 ***
