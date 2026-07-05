@@ -4486,7 +4486,7 @@ void WebServer::handleApiConfig(uint8_t sn){
                 (double)d.scale, (double)d.offset, (double)d.divider,
                 d.unit, (unsigned)d.channel_idx,
                 d.metric_id, (unsigned)d.send_interval_polls,
-                (unsigned)d.poll_interval_polls, (unsigned)d.avg_window_polls
+                (unsigned)d.poll_interval_ms, (unsigned)d.avg_window_polls
             );
         }
         n += std::snprintf(m_respBuf+n, RESP_BUF_SIZE-n, "]}");
