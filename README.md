@@ -463,6 +463,44 @@ Iridium SBD
 
 ***
 
+## Структура проекта
+
+```text
+MonSet-main-2/
+├── Core/
+│   ├── Inc/                         # Заголовочные файлы приложения
+│   ├── Src/                         # Основная логика устройства
+│   └── Startup/                     # Startup-код STM32
+├── Drivers/                         # STM32Cube HAL и драйверы периферии
+├── FATFS/                           # FatFS для SD-карты
+├── Middlewares/                     # mbedTLS и сторонние middleware
+├── www/                             # HTML/CSS/JS страницы веб-интерфейса
+├── docs/                            # Дополнительная документация
+├── MonSet.ioc                       # Конфигурация STM32CubeMX
+├── STM32F407VETX_FLASH.ld           # Линковка для прошивки во Flash
+├── STM32F407VETX_RAM.ld             # Линковка для исполнения из RAM
+├── README.md                        # Основное описание проекта
+├── AI_SESSION_INSTRUCTIONS.md       # Технические инструкции для сессий миграции
+└── IMPLEMENTATION_STATUS.md         # Статус переноса и реализации функций
+```
+
+### Ключевые исходные файлы
+
+| Файл | Назначение |
+|---|---|
+| `Core/Src/main.cpp` | Точка входа, инициализация HAL, периферии и запуск приложения |
+| `Core/Src/app.cpp` | Основной конечный автомат устройства |
+| `Core/Src/runtime_config.cpp` | Работа с runtime-конфигом на SD-карте |
+| `Core/Src/sensor_reader.cpp` | Опрос RTU-датчиков и получение измерений |
+| `Core/Src/web_server.cpp` | Веб-сервер, API и выдача файлов веб-интерфейса |
+| `Core/Src/sd_backup.cpp` | Бэкап неотправленных измерений |
+| `Core/Src/channel_manager.cpp` | Логика выбора и контроля каналов связи |
+| `Core/Src/mqtt_client.cpp` | MQTT-отправка телеметрии |
+| `Core/Src/https_w5500.cpp` | HTTPS через Ethernet W5500 |
+| `Core/Src/captive_portal.cpp` | Первичная настройка через ESP8266 |
+
+***
+
 ### Зарезервированные ресурсы для будущей разработки
 
 | Ресурс | Пин / Интерфейс | Планируемое использование |
