@@ -79,6 +79,15 @@ static void writeNav(char* buf, int& n, int bsz, const char* active) {
 }
 
 // ── Constructor / init ────────────────────────────────────────────────────────
+// Этап 9: static-определения буферов (объявлены static в web_server.hpp).
+// section(".ccmram") требует статического времени жизни символа — обычное
+// нестатическое поле класса лежит внутри объекта WebServer и не может быть
+// адресовано линкером как отдельная секция ("section attribute not allowed").
+// WebServer используется как единственный синглтон (App::m_webServer) —
+// превращение в static-члены класса безопасно, поведение не меняется.
+char WebServer::m_reqBuf[WebServer::REQ_BUF_SIZE] __attribute__((section(".ccmram")));
+char WebServer::m_respBuf[WebServer::RESP_BUF_SIZE] __attribute__((section(".ccmram")));
+
 WebServer::WebServer() {}
 
 
