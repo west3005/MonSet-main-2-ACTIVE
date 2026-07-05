@@ -5181,44 +5181,48 @@ void WebServer::tick(){
                         const char* clStr = std::strstr(m_reqBuf, "Content-Length: ");
                         if (clStr) {
                             int cl = std::atoi(clStr + 16);
-                            if (cl <= 0) {
+                            if (cl < 0) {
                                 const char* r = "{\"error\":\"bad Content-Length\"}";
                                 sendResponse(HTTP_SOCKET, 400, "application/json", r, (uint16_t)std::strlen(r));
                                 disconnect(HTTP_SOCKET);
                                 return;
                             }
-                            if (cl >= REQ_BUF_SIZE - 1024) {
-                                const char* r = "{\"error\":\"config payload too large\"}";
-                                sendResponse(HTTP_SOCKET, 413, "application/json", r, (uint16_t)std::strlen(r));
-                                DBG.error("WebServer: POST too large cl=%d", cl);
-                                disconnect(HTTP_SOCKET);
-                                return;
-                            }
-                            const char* bodyStart = std::strstr(m_reqBuf, "\r\n\r\n");
-                            if (bodyStart) {
-                                bodyStart += 4; // Skip CRLFCRLF
-                                int currentBodyLen = rx - (bodyStart - m_reqBuf);
+                            // cl==0: POST без тела (напр. /api/delete?path=... — данные в query string,
+                            // не в body) — валидный случай, не ошибка. Просто пропускаем ожидание body.
+                            if (cl > 0) {
+                                if (cl >= REQ_BUF_SIZE - 1024) {
+                                    const char* r = "{\"error\":\"config payload too large\"}";
+                                    sendResponse(HTTP_SOCKET, 413, "application/json", r, (uint16_t)std::strlen(r));
+                                    DBG.error("WebServer: POST too large cl=%d", cl);
+                                    disconnect(HTTP_SOCKET);
+                                    return;
+                                }
+                                const char* bodyStart = std::strstr(m_reqBuf, "\r\n\r\n");
+                                if (bodyStart) {
+                                    bodyStart += 4; // Skip CRLFCRLF
+                                    int currentBodyLen = rx - (bodyStart - m_reqBuf);
 
-                                // Read the remaining bytes if any
-                                uint32_t startWait = HAL_GetTick();
-                                while (currentBodyLen < cl && (HAL_GetTick() - startWait) < 2000) {
-                                    int32_t avail = getSn_RX_RSR(HTTP_SOCKET);
-                                    if (avail > 0) {
-                                        int toRead = cl - currentBodyLen;
-                                        if (toRead > avail) toRead = avail;
-                                        if (rx + toRead > REQ_BUF_SIZE - 1) toRead = REQ_BUF_SIZE - 1 - rx;
-                                        if (toRead <= 0) break; // Safety against overflow
+                                    // Read the remaining bytes if any
+                                    uint32_t startWait = HAL_GetTick();
+                                    while (currentBodyLen < cl && (HAL_GetTick() - startWait) < 2000) {
+                                        int32_t avail = getSn_RX_RSR(HTTP_SOCKET);
+                                        if (avail > 0) {
+                                            int toRead = cl - currentBodyLen;
+                                            if (toRead > avail) toRead = avail;
+                                            if (rx + toRead > REQ_BUF_SIZE - 1) toRead = REQ_BUF_SIZE - 1 - rx;
+                                            if (toRead <= 0) break; // Safety against overflow
 
-                                        int32_t chunk = recv(HTTP_SOCKET, (uint8_t*)(m_reqBuf + rx), (uint16_t)toRead);
-                                        if (chunk > 0) {
-                                            rx += chunk;
-                                            m_reqBuf[rx] = 0;
-                                            currentBodyLen += chunk;
-                                            startWait = HAL_GetTick(); // Reset timeout
+                                            int32_t chunk = recv(HTTP_SOCKET, (uint8_t*)(m_reqBuf + rx), (uint16_t)toRead);
+                                            if (chunk > 0) {
+                                                rx += chunk;
+                                                m_reqBuf[rx] = 0;
+                                                currentBodyLen += chunk;
+                                                startWait = HAL_GetTick(); // Reset timeout
+                                            }
                                         }
+                                        IWDG->KR = 0xAAAA;
+                                        HAL_Delay(1);
                                     }
-                                    IWDG->KR = 0xAAAA;
-                                    HAL_Delay(1);
                                 }
                             }
                         }
