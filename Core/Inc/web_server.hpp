@@ -58,13 +58,15 @@ private:
 
     static constexpr uint16_t HTTP_PORT   = 80;
 
-    static constexpr uint16_t REQ_BUF_SIZE  = 20480;  // POST /api/upload — файлы до ~19KB (multipart overhead ~1KB)
-    // Этап 9: перенесено в CCMRAM (0x10000000, 64KB) — после увеличения
-    // REQ_BUF_SIZE с 6KB до 20KB основная RAM (128KB) переполнилась на
-    // 11280 байт при линковке (region RAM overflowed). W5500 работает через
-    // SPI без DMA (см. w5500_port.c/.h) — CCMRAM недоступна только для DMA,
-    // поэтому перенос безопасен. m_reqBuf/m_respBuf суммарно 28KB из 64KB CCMRAM.
-    static char m_reqBuf[REQ_BUF_SIZE] __attribute__((section(".ccmram")));
+    // Этап 9: CCMRAM НЕДОСТУПНА для этих буферов — CircularLogBuffer уже
+    // занимает 64000 из 65536 байт CCMRAM (500 строк x 128 байт, см.
+    // circular_log.cpp), попытка разместить там m_reqBuf/m_respBuf дала
+    // "region CCMRAM overflowed by 27148 bytes". Буферы остаются в обычной
+    // RAM; чтобы вместить file-upload без переполнения RAM, размер уменьшен
+    // до 10240 (10KB, файлы до ~9KB) вместо изначальных 20480, и _Min_Heap_Size
+    // подрезан на 2KB в STM32F407VETX_FLASH.ld (см. соответствующий коммит).
+    static constexpr uint16_t REQ_BUF_SIZE  = 10240;  // POST /api/upload — файлы до ~9KB (multipart overhead ~1KB)
+    char m_reqBuf[REQ_BUF_SIZE];
 
     /**
      * RESP_BUF_SIZE — 6KB вмещает любую inline HTML страницу.
@@ -81,7 +83,7 @@ private:
      */
     static constexpr uint16_t TX_CHUNK_SIZE = 512;
 
-    static char m_respBuf[RESP_BUF_SIZE] __attribute__((section(".ccmram")));
+    char m_respBuf[RESP_BUF_SIZE];
 
     bool checkAuth(const char* request);
     void send401(uint8_t sn);
