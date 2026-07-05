@@ -62,10 +62,12 @@ private:
     // занимает 64000 из 65536 байт CCMRAM (500 строк x 128 байт, см.
     // circular_log.cpp), попытка разместить там m_reqBuf/m_respBuf дала
     // "region CCMRAM overflowed by 27148 bytes". Буферы остаются в обычной
-    // RAM; чтобы вместить file-upload без переполнения RAM, размер уменьшен
-    // до 10240 (10KB, файлы до ~9KB) вместо изначальных 20480, и _Min_Heap_Size
-    // подрезан на 2KB в STM32F407VETX_FLASH.ld (см. соответствующий коммит).
-    static constexpr uint16_t REQ_BUF_SIZE  = 10240;  // POST /api/upload — файлы до ~9KB (multipart overhead ~1KB)
+    // RAM. _Min_Heap_Size НЕ трогаем — mbedTLS и так на пределе (см.
+    // комментарий в STM32F407VETX_FLASH.ld: "needs ~18KB" из 24KB). Вместо
+    // этого REQ_BUF_SIZE поднят лишь до безопасного предела — было 6144,
+    // фактический запас RAM до правок был ~3056 байт (11280 overflow при
+    // REQ_BUF_SIZE=20480, разница 14336-11280=3056) — берём с запасом ниже.
+    static constexpr uint16_t REQ_BUF_SIZE  = 8192;   // POST /api/upload — файлы до ~7KB (multipart overhead ~1KB)
     char m_reqBuf[REQ_BUF_SIZE];
 
     /**
