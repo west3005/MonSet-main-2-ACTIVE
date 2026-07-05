@@ -59,7 +59,12 @@ private:
     static constexpr uint16_t HTTP_PORT   = 80;
 
     static constexpr uint16_t REQ_BUF_SIZE  = 20480;  // POST /api/upload — файлы до ~19KB (multipart overhead ~1KB)
-    char m_reqBuf[REQ_BUF_SIZE];
+    // Этап 9: перенесено в CCMRAM (0x10000000, 64KB) — после увеличения
+    // REQ_BUF_SIZE с 6KB до 20KB основная RAM (128KB) переполнилась на
+    // 11280 байт при линковке (region RAM overflowed). W5500 работает через
+    // SPI без DMA (см. w5500_port.c/.h) — CCMRAM недоступна только для DMA,
+    // поэтому перенос безопасен. m_reqBuf/m_respBuf суммарно 28KB из 64KB CCMRAM.
+    char m_reqBuf[REQ_BUF_SIZE] __attribute__((section(".ccmram")));
 
     /**
      * RESP_BUF_SIZE — 6KB вмещает любую inline HTML страницу.
@@ -76,7 +81,7 @@ private:
      */
     static constexpr uint16_t TX_CHUNK_SIZE = 512;
 
-    char m_respBuf[RESP_BUF_SIZE];
+    char m_respBuf[RESP_BUF_SIZE] __attribute__((section(".ccmram")));
 
     bool checkAuth(const char* request);
     void send401(uint8_t sn);
