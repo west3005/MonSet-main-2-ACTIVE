@@ -146,6 +146,9 @@ float SensorReader::read(DateTime& timestamp) {
 
     // --- Multi-sensor mode (modbus_map configured) ---
     if (c.modbus_map_count > 0) {
+        // Этап 7: legacy modbus_map режим не поддерживает per-device poll_interval_polls —
+        // опрашивается целиком каждый тик, поэтому все каналы считаются "свежими".
+        for (uint8_t i = 0; i < MAX_SENSOR_READINGS; ++i) m_freshThisCycle[i] = false;
         for (uint8_t i = 0; i < c.modbus_map_count && i < MAX_SENSOR_READINGS; i++) {
             SensorReading& rdg = m_readings[m_readingCount];
             rdg = SensorReading{}; // reset
@@ -159,9 +162,68 @@ float SensorReader::read(DateTime& timestamp) {
                 rdg.timestamp = timestamp;
                 m_readingCount++;
             }
+            m_freshThisCycle[i] = true;
         }
 
         // Return first valid reading for backward compat
+        for (uint8_t i = 0; i < m_readingCount; i++) {
+            if (m_readings[i].valid) {
+                m_lastValue = m_readings[i].value;
+                break;
+            }
+        }
+        return m_lastValue;
+    }
+
+    // --- Structured RTU device mode (JSON rtu[] via ModbusDeviceCfg) ---
+    // Использует существующий pollRtuPorts()/readModbusDevice() из
+    // sensor_reader_ext.cpp, который уже корректно применяет data_type
+    // (включая FLOAT32_BE), scale, divider и offset.
+    bool anyRtuDevice = false;
+    for (uint8_t port = 0; port < MAX_RTU_PORTS && !anyRtuDevice; ++port) {
+        const auto& rtu = c.rtu_ports[port];
+        if (!rtu.enabled) continue;
+        for (uint8_t dev = 0; dev < rtu.device_count; ++dev) {
+            if (rtu.devices[dev].enabled) { anyRtuDevice = true; break; }
+        }
+    }
+
+    if (anyRtuDevice) {
+        // Этап 7: НЕ обнуляем m_readings целиком — "медленные" датчики
+        // (poll_interval_polls > 1) должны сохранять последнее валидное
+        // значение между своими реальными опросами, иначе backup получит
+        // невалидные/нулевые записи на тиках, где опрос был пропущен.
+        // Обнуляем только слоты устройств, которые СКОНФИГУРИРОВАНЫ, но
+        // выключены (enabled=false) или их порт выключен — иначе устаревшее
+        // значение отключённого датчика будет висеть в payload бесконечно.
+        // ВАЖНО: неиспользуемые слоты devices[dev >= device_count] имеют
+        // channel_idx=0 по умолчанию — их трогать нельзя, иначе затрём канал 0.
+        for (uint8_t port = 0; port < MAX_RTU_PORTS; ++port) {
+            const auto& rtuChk = c.rtu_ports[port];
+            for (uint8_t dev = 0; dev < rtuChk.device_count && dev < ModbusRtuPortConfig::MAX_DEVICES; ++dev) {
+                const auto& dChk = rtuChk.devices[dev];
+                if ((!rtuChk.enabled || !dChk.enabled) && dChk.channel_idx < MAX_SENSOR_READINGS) {
+                    m_readings[dChk.channel_idx] = SensorReading{};
+                }
+            }
+        }
+
+        pollRtuPorts(c.rtu_ports, MAX_RTU_PORTS);
+
+        uint8_t maxIdx = 0;
+        for (uint8_t port = 0; port < MAX_RTU_PORTS; ++port) {
+            const auto& rtu = c.rtu_ports[port];
+            if (!rtu.enabled) continue;
+            for (uint8_t dev = 0; dev < rtu.device_count; ++dev) {
+                const auto& d = rtu.devices[dev];
+                if (d.enabled && d.channel_idx < MAX_SENSOR_READINGS) {
+                    m_readings[d.channel_idx].timestamp = timestamp;
+                    if (d.channel_idx + 1 > maxIdx) maxIdx = d.channel_idx + 1;
+                }
+            }
+        }
+        m_readingCount = maxIdx;
+
         for (uint8_t i = 0; i < m_readingCount; i++) {
             if (m_readings[i].valid) {
                 m_lastValue = m_readings[i].value;
@@ -182,19 +244,23 @@ float SensorReader::read(DateTime& timestamp) {
         regs
     );
 
+    m_freshThisCycle[0] = false;
     if (status == ModbusStatus::Ok) {
         m_lastValue = convertLegacy(regs[0], regs[1]);
         DBG.info("Modbus: [0x%04X,0x%04X] -> %.3f", regs[0], regs[1], m_lastValue);
 
-        // Populate reading[0] for uniform access
         SensorReading& rdg = m_readings[0];
+        rdg = SensorReading{};
         std::strncpy(rdg.name, c.metric_id, sizeof(rdg.name) - 1);
+        rdg.name[sizeof(rdg.name) - 1] = 0;
         rdg.value     = m_lastValue;
         rdg.raw_value = m_lastValue;
         rdg.unit[0]   = 0;
         rdg.valid     = true;
         rdg.timestamp = timestamp;
         m_readingCount = 1;
+        // Этап 7: legacy single-sensor режим — опрашивается каждый тик безусловно.
+        m_freshThisCycle[0] = true;
     } else {
         DBG.error("Modbus: error %d", static_cast<int>(status));
     }

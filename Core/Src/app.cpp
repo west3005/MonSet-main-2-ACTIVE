@@ -365,11 +365,17 @@ static int httpPostPlainW5500(const char* url,const char* authB64,
 App::App()
     : m_rtc(&hi2c1)
     , m_modbusPort0(&huart3, PIN_RS485_DE_PORT, PIN_RS485_DE_PIN)
+    , m_modbusPorts{&m_modbusPort0, &m_modbusPort1, &m_modbusPort2}
+      ///< m_modbusPort1/2 default-constructed выше (объявлены раньше m_modbusPorts);
+      ///< configure() для них вызывается позже в init() при rtu_ports[N].enabled.
     , m_gsm(&huart2, PIN_SIM_PWR_PORT, PIN_SIM_PWR_PIN)
-    , m_sdBackup()
-    , m_sensor(m_modbusPort0, m_rtc)
+    , m_devBackup()
+    , m_sensor(m_modbusPorts, m_rtc)
+      ///< fix: используем 3-портовый конструктор SensorReader, иначе
+      ///< m_ports[1]/m_ports[2] оставались nullptr и UART4/UART5 не опрашивались
+      ///< даже при rtu_ports[1|2].enabled=true (см. sensor_reader.cpp::readEntry).
     , m_buffer()
-    , m_power(&hrtc, m_sdBackup)
+    , m_power(&hrtc, m_devBackup)
     , m_channelMgr()
     , m_mqtt()
     , m_webhook()
@@ -379,13 +385,9 @@ App::App()
     , m_captivePortal()
     , m_battery()
 {
-    m_modbusPorts[0] = &m_modbusPort0;
-    m_modbusPorts[1] = &m_modbusPort1;
-    m_modbusPorts[2] = &m_modbusPort2;
-    // Имена файлов бэкапа (дефолты); обновятся в setup() после loadFromSd()
-    m_sdBackup.setFilename(Config::PORT0_BACKUP_FILE);
-    m_sdBackup1.setFilename(Config::PORT1_BACKUP_FILE);
-    m_sdBackup2.setFilename(Config::PORT2_BACKUP_FILE);
+    // Дефолтное имя файла бэкапа; реальное имя переключается setFilename()
+    // на "backup_ch{N}.jsn" перед каждой записью/чтением конкретного канала.
+    m_devBackup.setFilename(Config::BACKUP_FILENAME);
 }
 
 SystemMode App::readMode() {
@@ -640,16 +642,13 @@ void App::init() {
     } else {
         DBG.info("[2/9] UART5 port2 disabled");
     }
-    // Имена файлов бэкапа: берём из config.hpp (константы).
-    // backup_filename в rtu_ports дублирует их для UI (/api/config),
-    // но для SdBackup используем compile-time константы — стабильнее.
-    m_sdBackup.setFilename(Config::PORT0_BACKUP_FILE);
-    m_sdBackup1.setFilename(Config::PORT1_BACKUP_FILE);
-    m_sdBackup2.setFilename(Config::PORT2_BACKUP_FILE);
+    // Схема бэкапов "Этап 5": единый SdBackup, имя файла переключается
+    // на "backup_ch{N}.jsn" перед каждой операцией (см. buildChannelBackupName()).
+    m_devBackup.setFilename(Config::BACKUP_FILENAME);
     DBG.info("[3/9] SD init");
     // SD инициализируется всегда — g_sd_disabled выставляется только
     // если MX_SDIO_SD_Init() реально упал (см. main.cpp)
-    m_sdOk = !g_sd_disabled && m_sdBackup.init();
+    m_sdOk = !g_sd_disabled && m_devBackup.init();
     if (g_sd_disabled) {
         DBG.warn("[3/9] SD skipped (SDIO hardware failure on boot)");
     } else {
@@ -677,7 +676,7 @@ void App::init() {
     // Web-сервер стартует НЕЗАВИСИМО от mode и eth_enabled.
     // Если W5500 ещё не поднят (DHCP не ответил) — init() выставит m_running=false
     // и флаг m_webStartPending=true. Повторная попытка каждую итерацию run().
-    m_webServer.init(&m_sensor, &m_sdBackup, &m_battery, this);
+    m_webServer.init(&m_sensor, &m_devBackup, &m_battery, this);
     m_webServer.setRtc(&m_rtc);
     m_webServer.setSdOk(m_sdOk);
     if (!m_webServer.isRunning()) {
@@ -689,7 +688,7 @@ void App::init() {
 }
 
 void App::initChannelManager() {
-    m_channelMgr.init(&m_sdBackup);
+    m_channelMgr.init(&m_devBackup);
     if(Cfg().eth_enabled)     m_channelMgr.registerChannel(Channel::ETHERNET,sendViaEth,    this);
     if(Cfg().gsm_enabled)     m_channelMgr.registerChannel(Channel::GSM,     sendViaGsm,    this);
     if(Cfg().wifi_enabled)    m_channelMgr.registerChannel(Channel::WIFI,    sendViaWifi,   this);
@@ -698,7 +697,7 @@ void App::initChannelManager() {
 }
 
 void App::reinitChannelManager() {
-    m_channelMgr.init(&m_sdBackup);  // сброс + повторная регистрация
+    m_channelMgr.init(&m_devBackup);  // сброс + повторная регистрация
     if(Cfg().eth_enabled)     m_channelMgr.registerChannel(Channel::ETHERNET,sendViaEth,    this);
     if(Cfg().gsm_enabled)     m_channelMgr.registerChannel(Channel::GSM,     sendViaGsm,    this);
     if(Cfg().wifi_enabled)    m_channelMgr.registerChannel(Channel::WIFI,    sendViaWifi,   this);
@@ -747,7 +746,7 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
         // пробуем повторно каждую итерацию главного цикла.
         if (m_webStartPending) {
             if (ensureEthReady()) {
-                m_webServer.init(&m_sensor, &m_sdBackup, &m_battery, this);
+                m_webServer.init(&m_sensor, &m_devBackup, &m_battery, this);
                 m_webServer.setRtc(&m_rtc);
                 m_webServer.setSdOk(m_sdOk);
                 if (m_webServer.isRunning()) {
@@ -808,16 +807,43 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
         ledBlink(1, 50);
 
         if (m_sdOk) {
-            char line[Config::JSONL_LINE_MAX]; int l;
-            if (m_sensor.getReadingCount() > 1 || Cfg().modbus_map_count > 0)
-                l = buildMultiSensorPayload(line, sizeof(line), tsStr, ts, false);
-            else
-                l = buildPayload(line, sizeof(line), tsStr, val, ts, false);
-            if (l > 0 && l < (int)sizeof(line)) {
-                if (!m_sdBackup.appendLine(line)) {
-                    DBG.error("SD: appendLine failed"); m_sdOk = false;
-                    m_webServer.setSdOk(false); // sync SD status to web
+            // Этап 5: свой файл бэкапа на каждый датчик (backup_ch{channel_idx}.jsn).
+            // Этап 7: пишем ТОЛЬКО свежие показания (isFreshThisCycle) — иначе
+            // "медленные" датчики (poll_interval_polls > 1) дублировали бы одно
+            // и то же старое значение в бэкап на каждом тике главного цикла.
+            uint8_t rdCnt = m_sensor.getReadingCount();
+            char line[Config::JSONL_LINE_MAX];
+            bool anyWriteFail = false;
+            if (rdCnt > 0) {
+                for (uint8_t ci = 0; ci < rdCnt; ci++) {
+                    if (!m_sensor.isFreshThisCycle(ci)) continue;
+                    const SensorReading& rd = m_sensor.getReading(ci);
+                    if (!rd.valid) continue;
+                    int l = buildChannelPayload(line, sizeof(line), tsStr, ts, rd);
+                    if (l <= 0 || l >= (int)sizeof(line)) continue;
+                    char fname[24];
+                    buildChannelBackupName(fname, sizeof(fname), ci);
+                    m_devBackup.setFilename(fname);
+                    if (!m_devBackup.appendLine(line)) {
+                        DBG.error("SD: appendLine failed ch=%u", (unsigned)ci);
+                        anyWriteFail = true;
+                    }
                 }
+            } else if (m_sensor.isFreshThisCycle(0)) {
+                // Legacy fallback: нет multi-sensor readings — один канал 0
+                int l = buildPayload(line, sizeof(line), tsStr, val, ts, false);
+                if (l > 0 && l < (int)sizeof(line)) {
+                    char fname[24];
+                    buildChannelBackupName(fname, sizeof(fname), 0);
+                    m_devBackup.setFilename(fname);
+                    if (!m_devBackup.appendLine(line)) {
+                        DBG.error("SD: appendLine failed ch=0"); anyWriteFail = true;
+                    }
+                }
+            }
+            if (anyWriteFail) {
+                m_sdOk = false;
+                m_webServer.setSdOk(false); // sync SD status to web
             }
         }
 
@@ -832,34 +858,17 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
         m_pollCounter++;
         if (m_pollCounter >= Cfg().send_interval_polls) {
             m_pollCounter = 0;
-            int jsonLen;
-            if (m_sensor.getReadingCount() > 1 || Cfg().modbus_map_count > 0)
-                jsonLen = buildMultiSensorPayload(m_json, sizeof(m_json), tsStr, ts, true);
-            else
-                jsonLen = buildPayload(m_json, sizeof(m_json), tsStr, val, ts, true);
-
-            if (jsonLen > 0 && jsonLen < (int)sizeof(m_json)) {
-                // FIX: не трогаем W5500 сокеты пока веб активен
-                if (m_webActive) {
-                    DBG.info("[WEB_ACTIVE] send skipped, data queued to backup");
-                    if (m_sdOk) m_sdBackup.appendLine(m_json);
-                } else {
-                    SendResult result = m_channelMgr.sendData(m_json, (uint16_t)jsonLen);
-                    m_channelAlive = (result == SendResult::Ok);
-                    if (result == SendResult::Ok) {
-                        DBG.info("Data sent OK");
-                        // Этап 2: сброс буферов усреднения после успешной отправки
-                        // Аналог ocean-station: value_buffer.clear()
-                        avgClearAll();
-                    } else if (result == SendResult::SavedBackup) {
-                        DBG.warn("Data saved to backup");
-                        // Сбрасываем буфер и при сохранении в backup — данные уже записаны
-                        avgClearAll();
-                    } else {
-                        DBG.error("Data send FAILED");
-                        // Буфер НЕ сбрасываем при ошибке — накапливаем дальше
-                    }
-                }
+            // Этап 8: усреднение теперь происходит ДО записи в backup_ch{N}.jsn
+            // (см. sensor_reader_ext.cpp::pollRtuPorts(), avg_window_polls) —
+            // отправка просто перегоняет все накопленные за интервал усреднённые
+            // записи через retransmitBackup(), а не строит live-payload из
+            // мгновенных значений датчиков.
+            if (m_webActive) {
+                DBG.info("[WEB_ACTIVE] send skipped, backup will be retransmitted later");
+            } else {
+                retransmitBackup();
+                // Software watchdog: считаем канал живым, если хотя бы один активен
+                m_channelAlive = (m_channelMgr.activeCount() > 0);
             }
         }
 
@@ -870,7 +879,7 @@ bool App::syncRtcWithNtpIfNeeded(const char* tag,bool verbose) {
         // Backup retransmit — Этап 6: раздельные интервалы GSM/ETH и Iridium
         // GSM/ETH: backup_retry_gsm_sec (default 60, аналог ocean-station retry_all)
         // Iridium:  backup_retry_iridium_sec (default 600, аналог ocean-station retry_iridium)
-        if (m_sdBackup.exists()) {
+        if (anyBackupExists()) {
             uint32_t now = HAL_GetTick();
             const RuntimeConfig& rc = Cfg();
             // GSM/ETH retry — используем m_lastBackupSendTick (уже в app.hpp)
@@ -967,33 +976,85 @@ void App::transmitSingle(float value,const DateTime& dt) {
 
 void App::transmitBuffer() { retransmitBackup(); }
 
+// ================================================================
+// Этап 5: per-channel backup helpers
+// ================================================================
+void App::buildChannelBackupName(char* out, size_t sz, uint8_t channelIdx) {
+    std::snprintf(out, sz, "backup_ch%u.jsn", (unsigned)channelIdx);
+}
+
+int App::buildChannelPayload(char* buf, size_t bsz, const char* tsStr,
+                              const DateTime& dt, const SensorReading& r) {
+    const uint64_t unixMs = toUnixMs(dt);
+    const uint16_t ms = (uint16_t)(unixMs % 1000ULL);
+    const char* mid = (r.name[0] != '\0') ? r.name : Cfg().metric_id;
+
+    if (Cfg().protocol == ProtocolMode::OCEAN_MONITOR) {
+        return std::snprintf(buf, bsz,
+            "{\"metricId\":\"%s\",\"value\":\"%.3f\","
+            "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.%03uZ\"}",
+            mid, (double)r.value,
+            (unsigned)dt.year, (unsigned)dt.month,  (unsigned)dt.date,
+            (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
+            (unsigned)ms);
+    }
+    return std::snprintf(buf, bsz,
+        "{\"ts\":%s,\"values\":{\"metricId\":\"%s\",\"value\":%.3f,"
+        "\"measureTime\":\"20%02u-%02u-%02uT%02u:%02u:%02u.%03uZ\"}}",
+        tsStr, mid, (double)r.value,
+        (unsigned)dt.year, (unsigned)dt.month,  (unsigned)dt.date,
+        (unsigned)dt.hours,(unsigned)dt.minutes,(unsigned)dt.seconds,
+        (unsigned)ms);
+}
+
+bool App::anyBackupExists() {
+    m_devBackup.setFilename(Config::BACKUP_FILENAME);
+    if (m_devBackup.exists()) return true;
+    for (uint8_t ch = 0; ch < MAX_SENSOR_READINGS; ch++) {
+        char fname[24];
+        buildChannelBackupName(fname, sizeof(fname), ch);
+        m_devBackup.setFilename(fname);
+        if (m_devBackup.exists()) return true;
+    }
+    return false;
+}
+
 void App::retransmitBackup() {
-    // Отправляем последовательно: порт 0 → порт 1 → порт 2
-    // Каждый файл передаётся полностью до перехода к следующему.
-    SdBackup* backs[3] = { &m_sdBackup, &m_sdBackup1, &m_sdBackup2 };
+    // Этап 5: отправляем последовательно все файлы бэкапа —
+    // сначала общий backup.jsn (web_active queue / fallback ChannelManager),
+    // затем backup_ch0.jsn .. backup_ch{MAX_SENSOR_READINGS-1}.jsn (по датчикам).
     const uint32_t maxPayload = (Config::HTTP_CHUNK_MAX < Config::JSON_BUFFER_SIZE)
                                  ? Config::HTTP_CHUNK_MAX
                                  : (Config::JSON_BUFFER_SIZE - 1);
-    for (uint8_t p = 0; p < 3; p++) {
-        SdBackup* bk = backs[p];
-        if (!bk->exists()) continue;
-        DBG.info("Backup retransmit port%u file=%s", (unsigned)p, bk->filename());
-        while (bk->exists()) {
+
+    char names[MAX_SENSOR_READINGS + 1][24];
+    uint8_t nameCount = 0;
+    std::strncpy(names[nameCount++], Config::BACKUP_FILENAME, sizeof(names[0]) - 1);
+    for (uint8_t ch = 0; ch < MAX_SENSOR_READINGS; ch++) {
+        buildChannelBackupName(names[nameCount], sizeof(names[0]), ch);
+        nameCount++;
+    }
+
+    for (uint8_t idx = 0; idx < nameCount; idx++) {
+        m_devBackup.setFilename(names[idx]);
+        if (!m_devBackup.exists()) continue;
+        DBG.info("Backup retransmit file=%s", m_devBackup.filename());
+        while (m_devBackup.exists()) {
             uint32_t lines = 0; FSIZE_t used = 0;
-            bool ok = bk->readChunkAsJsonArray(m_json, sizeof(m_json), maxPayload, lines, used);
+            bool ok = m_devBackup.readChunkAsJsonArray(m_json, sizeof(m_json), maxPayload, lines, used);
             if (!ok || lines == 0 || used == 0) {
-                DBG.warn("Backup port%u: empty or unreadable, skip", (unsigned)p);
+                DBG.warn("Backup %s: empty or unreadable, skip", names[idx]);
                 break;
             }
             SendResult result = m_channelMgr.sendData(m_json, (uint16_t)std::strlen(m_json));
             if (result == SendResult::Ok) {
-                bk->consumePrefix(used);
+                m_devBackup.consumePrefix(used);
             } else {
-                DBG.error("Backup retransmit port%u failed, abort", (unsigned)p);
+                DBG.error("Backup retransmit %s failed, abort", names[idx]);
                 return;  // прерываем всю цепочку — связь пропала
             }
         }
-        DBG.info("Backup port%u fully transmitted", (unsigned)p);
+        DBG.info("Backup %s fully transmitted", names[idx]);
     }
-    DBG.info("All backups transmitted (ports 0-2)");
+    DBG.info("All backups transmitted (общий + %u каналов)", (unsigned)MAX_SENSOR_READINGS);
 }

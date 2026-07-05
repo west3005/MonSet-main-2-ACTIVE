@@ -123,7 +123,7 @@ void A7670C::powerOn()
     HAL_Delay(1500);
     HAL_GPIO_WritePin(PIN_CELL_PWRKEY_PORT, PIN_CELL_PWRKEY_PIN, GPIO_PIN_SET);
 
-    if (!waitRdyA7670(25000)) {
+    if (!waitRdyA7670(3000)) {
         DBG.warn("A7670C: ME PDN ACT не получен — пробуем AT");
         // Дополнительная пауза: модем ещё загружается, SIM не инициализирована
         HAL_Delay(3000);

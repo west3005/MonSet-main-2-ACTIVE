@@ -325,7 +325,7 @@ function doDelete() {
     .then(function(d) {
       if (d.ok || d.status === 'ok') {
         toast('Удалено: ' + _delPath, 'ok');
-        loadDir(cwd);
+        setTimeout(function() { loadDir(cwd); }, 300);
       } else {
         toast('Ошибка: ' + (d.error || d.message || '?'), 'err');
         if (_delBtn) { _delBtn.disabled = false; _delBtn.textContent = '✕ Удалить'; }
@@ -348,7 +348,13 @@ function upload(files) {
   function next() {
     if (i >= files.length) {
       pb.style.display = 'none'; st.textContent = '';
-      loadDir(cwd);
+      // Небольшая задержка перед перезагрузкой списка: после ответа на
+      // POST /api/upload сервер (один TCP-сокет на всё HTTP) ещё какое-то
+      // время закрывает соединение и переоткрывает listen() — если fetch()
+      // для /api/files прилетает раньше, W5500 отвечает RST и браузер
+      // получает net::ERR_CONNECTION_REFUSED. 300мс с запасом покрывают
+      // цикл disconnect()->close()->socket()->listen() на стороне сервера.
+      setTimeout(function() { loadDir(cwd); }, 300);
       toast('Загружено: ' + files.length + ' файл(а)', 'ok');
       return;
     }

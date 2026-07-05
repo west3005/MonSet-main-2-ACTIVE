@@ -4478,14 +4478,15 @@ void WebServer::handleApiConfig(uint8_t sn){
                 "\"rs\":%u,\"rc\":%u,\"dt\":\"%s\","
                 "\"sc\":%f,\"of\":%f,\"dv\":%f,"
                 "\"un\":\"%s\",\"ci\":%u,"
-                "\"mi\":\"%s\",\"si\":%u}",
+                "\"mi\":\"%s\",\"si\":%u,\"pi\":%u,\"aw\":%u}",
                 j==0?"":",",
                 d.enabled?"true":"false",
                 (unsigned)d.slave_addr, d.name, (unsigned)d.func_code,
                 (unsigned)d.reg_start, (unsigned)d.reg_count, dtStr,
                 (double)d.scale, (double)d.offset, (double)d.divider,
                 d.unit, (unsigned)d.channel_idx,
-                d.metric_id, (unsigned)d.send_interval_polls
+                d.metric_id, (unsigned)d.send_interval_polls,
+                (unsigned)d.poll_interval_ms, (unsigned)d.avg_window_polls
             );
         }
         n += std::snprintf(m_respBuf+n, RESP_BUF_SIZE-n, "]}");
@@ -4911,11 +4912,11 @@ void WebServer::handleRequest(uint8_t sn,const char* request,uint16_t reqLen){
     if(m_activityCb) m_activityCb(m_activityCtx);
     if(m_app) m_app->notifyWebActivity();
 
-    char method[8]{},path[64]{};
-    std::sscanf(request,"%7s %63s",method,path);
+    char method[8]{},path[160]{};
+    std::sscanf(request,"%7s %159s",method,path);
     DBG.info("WebServer: %s %s",method,path);
 
-    char cleanPath[64]; std::strncpy(cleanPath,path,sizeof(cleanPath)-1);
+    char cleanPath[160]; std::strncpy(cleanPath,path,sizeof(cleanPath)-1);
     char* qs=std::strchr(cleanPath,'?'); if(qs)*qs='\0';
     const char* queryStr=qs?(std::strchr(path,'?')+1):"";
 
@@ -5027,10 +5028,18 @@ void WebServer::handleFiles(uint8_t sn){
 
 // GET /api/files?path=0:/  — JSON список файлов/папок
 void WebServer::handleApiFiles(uint8_t sn, const char* queryStr, const char* /*request*/){
-    char dirPath[64]="0:/";
+    char dirPath[160]="0:/";
     getQueryParam(queryStr,"path",dirPath,sizeof(dirPath));
     // FatFS не принимает "/" как корень — маппируем на "0:/"
     if(std::strcmp(dirPath,"/")==0 || dirPath[0]=='\0') std::strncpy(dirPath,"0:/",sizeof(dirPath));
+    // FatFS f_opendir() не принимает завершающий "/" для НЕ корневых путей
+    // ("0:/www/" -> FR_INVALID_NAME fr=6, т.к. create_name() пытается разобрать
+    // пустой сегмент после слэша). Фронтенд (files.html) всегда шлёт путь с
+    // trailing slash при переходе в подпапку — срезаем его, оставляя только "0:/".
+    {
+        size_t dlen = std::strlen(dirPath);
+        while (dlen > 3 && dirPath[dlen-1] == '/') { dirPath[dlen-1] = '\0'; dlen--; }
+    }
 
     char resp[4096]; int n=0;
     n+=std::snprintf(resp+n,sizeof(resp)-n,"{\"path\":\"%s\",\"items\":[",dirPath);
@@ -5102,8 +5111,8 @@ void WebServer::handleApiDownload(uint8_t sn, const char* queryStr, const char* 
 void WebServer::handleApiUpload(uint8_t sn, const char* body, const char* request){
     char filePath[128]="";
     // Извлекаем path из строки запроса (не из тела)
-    char method[8]{}, urlBuf[128]{};
-    std::sscanf(request,"%7s %127s",method,urlBuf);
+    char method[8]{}, urlBuf[160]{};
+    std::sscanf(request,"%7s %159s",method,urlBuf);
     const char* qs=std::strchr(urlBuf,'?');
     if(qs) qs++;
     if(!qs||!getQueryParam(qs,"path",filePath,sizeof(filePath))||!filePath[0]){
@@ -5180,44 +5189,48 @@ void WebServer::tick(){
                         const char* clStr = std::strstr(m_reqBuf, "Content-Length: ");
                         if (clStr) {
                             int cl = std::atoi(clStr + 16);
-                            if (cl <= 0) {
+                            if (cl < 0) {
                                 const char* r = "{\"error\":\"bad Content-Length\"}";
                                 sendResponse(HTTP_SOCKET, 400, "application/json", r, (uint16_t)std::strlen(r));
                                 disconnect(HTTP_SOCKET);
                                 return;
                             }
-                            if (cl >= REQ_BUF_SIZE - 1024) {
-                                const char* r = "{\"error\":\"config payload too large\"}";
-                                sendResponse(HTTP_SOCKET, 413, "application/json", r, (uint16_t)std::strlen(r));
-                                DBG.error("WebServer: POST too large cl=%d", cl);
-                                disconnect(HTTP_SOCKET);
-                                return;
-                            }
-                            const char* bodyStart = std::strstr(m_reqBuf, "\r\n\r\n");
-                            if (bodyStart) {
-                                bodyStart += 4; // Skip CRLFCRLF
-                                int currentBodyLen = rx - (bodyStart - m_reqBuf);
+                            // cl==0: POST без тела (напр. /api/delete?path=... — данные в query string,
+                            // не в body) — валидный случай, не ошибка. Просто пропускаем ожидание body.
+                            if (cl > 0) {
+                                if (cl >= REQ_BUF_SIZE - 1024) {
+                                    const char* r = "{\"error\":\"config payload too large\"}";
+                                    sendResponse(HTTP_SOCKET, 413, "application/json", r, (uint16_t)std::strlen(r));
+                                    DBG.error("WebServer: POST too large cl=%d", cl);
+                                    disconnect(HTTP_SOCKET);
+                                    return;
+                                }
+                                const char* bodyStart = std::strstr(m_reqBuf, "\r\n\r\n");
+                                if (bodyStart) {
+                                    bodyStart += 4; // Skip CRLFCRLF
+                                    int currentBodyLen = rx - (bodyStart - m_reqBuf);
 
-                                // Read the remaining bytes if any
-                                uint32_t startWait = HAL_GetTick();
-                                while (currentBodyLen < cl && (HAL_GetTick() - startWait) < 2000) {
-                                    int32_t avail = getSn_RX_RSR(HTTP_SOCKET);
-                                    if (avail > 0) {
-                                        int toRead = cl - currentBodyLen;
-                                        if (toRead > avail) toRead = avail;
-                                        if (rx + toRead > REQ_BUF_SIZE - 1) toRead = REQ_BUF_SIZE - 1 - rx;
-                                        if (toRead <= 0) break; // Safety against overflow
+                                    // Read the remaining bytes if any
+                                    uint32_t startWait = HAL_GetTick();
+                                    while (currentBodyLen < cl && (HAL_GetTick() - startWait) < 2000) {
+                                        int32_t avail = getSn_RX_RSR(HTTP_SOCKET);
+                                        if (avail > 0) {
+                                            int toRead = cl - currentBodyLen;
+                                            if (toRead > avail) toRead = avail;
+                                            if (rx + toRead > REQ_BUF_SIZE - 1) toRead = REQ_BUF_SIZE - 1 - rx;
+                                            if (toRead <= 0) break; // Safety against overflow
 
-                                        int32_t chunk = recv(HTTP_SOCKET, (uint8_t*)(m_reqBuf + rx), (uint16_t)toRead);
-                                        if (chunk > 0) {
-                                            rx += chunk;
-                                            m_reqBuf[rx] = 0;
-                                            currentBodyLen += chunk;
-                                            startWait = HAL_GetTick(); // Reset timeout
+                                            int32_t chunk = recv(HTTP_SOCKET, (uint8_t*)(m_reqBuf + rx), (uint16_t)toRead);
+                                            if (chunk > 0) {
+                                                rx += chunk;
+                                                m_reqBuf[rx] = 0;
+                                                currentBodyLen += chunk;
+                                                startWait = HAL_GetTick(); // Reset timeout
+                                            }
                                         }
+                                        IWDG->KR = 0xAAAA;
+                                        HAL_Delay(1);
                                     }
-                                    IWDG->KR = 0xAAAA;
-                                    HAL_Delay(1);
                                 }
                             }
                         }

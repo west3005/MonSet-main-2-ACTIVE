@@ -121,6 +121,12 @@ float SensorReader::readModbusDevice(ModbusRTU& port,
 
 void SensorReader::pollRtuPorts(const ModbusRtuPortConfig* rtu_ports,
                                  uint8_t portCount) {
+    // Этап 7: сбрасываем флаг "свежести" каждый цикл — устанавливается заново
+    // только для каналов, которые реально были опрошены в этом вызове.
+    for (uint8_t i = 0; i < MAX_SENSOR_READINGS; ++i) {
+        m_freshThisCycle[i] = false;
+    }
+
     for (uint8_t p = 0; p < portCount && p < MAX_RTU_PORTS; ++p) {
         const ModbusRtuPortConfig& pCfg = rtu_ports[p];
 
@@ -138,6 +144,22 @@ void SensorReader::pollRtuPorts(const ModbusRtuPortConfig* rtu_ports,
             if (!dev.enabled) {
                 continue;
             }
+            if (dev.channel_idx >= MAX_SENSOR_READINGS) {
+                continue;
+            }
+
+            // Этап 7: индивидуальный интервал опроса — реальные миллисекунды
+            // (poll_interval_ms), не тики главного цикла. 0 = опрос на каждой
+            // итерации (обратная совместимость с поведением до перехода на мс).
+            const uint32_t nowMs = HAL_GetTick();
+            uint32_t& lastPollMs = m_lastPollTickMs[dev.channel_idx];
+            if (dev.poll_interval_ms > 0 && lastPollMs != 0 &&
+                (nowMs - lastPollMs) < dev.poll_interval_ms) {
+                // Не время опроса этого устройства — не трогаем шину, слот
+                // сохраняет предыдущее значение (valid не меняется).
+                continue;
+            }
+            lastPollMs = nowMs;
 
             // Inter-frame delay before each transaction
             if (pCfg.inter_frame_ms > 0) {
@@ -145,23 +167,46 @@ void SensorReader::pollRtuPorts(const ModbusRtuPortConfig* rtu_ports,
             }
 
             float val = readModbusDevice(port, dev, pCfg);
+            bool valOk = (val > -9998.0f);
 
-            if (dev.channel_idx < MAX_SENSOR_READINGS) {
-                SensorReading& slot = m_readings[dev.channel_idx];
+            SensorReading& slot = m_readings[dev.channel_idx];
+
+            // Этап 8: окно усреднения ПЕРЕД записью в backup — считается в
+            // реальных опросах этого датчика (avg_window_polls=1 = без
+            // усреднения, обратная совместимость с поведением до Этапа 8).
+            const uint16_t avgWindow = (dev.avg_window_polls == 0) ? 1u : dev.avg_window_polls;
+            if (avgWindow <= 1) {
                 slot.value = val;
-                slot.valid = (val > -9998.0f);
-
-                // Этап 4: приоритет per-device metric_id над именем устройства
-                // Аналог ocean-station: fields[].metric_id → payload metricId
-                // Если metric_id непустой — он идёт в slot.name и затем в payload
-                // Если пустой — используется dev.name (как раньше, обратная совместимость)
-                const char* mid = (dev.metric_id[0] != '\0') ? dev.metric_id : dev.name;
-                std::strncpy(slot.name, mid, sizeof(slot.name) - 1);
-                slot.name[sizeof(slot.name) - 1] = '\0';
-
-                std::strncpy(slot.unit, dev.unit, sizeof(slot.unit) - 1);
-                slot.unit[sizeof(slot.unit) - 1] = '\0';
+                slot.valid = valOk;
+                m_freshThisCycle[dev.channel_idx] = true;
+            } else if (valOk) {
+                float&    sum = m_avgSum[dev.channel_idx];
+                uint16_t& cnt = m_avgSampleCount[dev.channel_idx];
+                sum += val;
+                cnt++;
+                if (cnt >= avgWindow) {
+                    slot.value = sum / (float)cnt;
+                    slot.valid = true;
+                    m_freshThisCycle[dev.channel_idx] = true;
+                    sum = 0.0f;
+                    cnt = 0;
+                }
+                // Иначе накопитель ещё не полон — слот не трогаем, fresh не ставим,
+                // предыдущее усреднённое значение (если было) остаётся в payload.
             }
+            // valOk==false и avgWindow>1: ошибочное измерение не портит накопитель
+            // усреднения — просто пропускаем этот отсчёт.
+
+            // Этап 4: приоритет per-device metric_id над именем устройства
+            // Аналог ocean-station: fields[].metric_id → payload metricId
+            // Если metric_id непустой — он идёт в slot.name и затем в payload
+            // Если пустой — используется dev.name (как раньше, обратная совместимость)
+            const char* mid = (dev.metric_id[0] != '\0') ? dev.metric_id : dev.name;
+            std::strncpy(slot.name, mid, sizeof(slot.name) - 1);
+            slot.name[sizeof(slot.name) - 1] = '\0';
+
+            std::strncpy(slot.unit, dev.unit, sizeof(slot.unit) - 1);
+            slot.unit[sizeof(slot.unit) - 1] = '\0';
         }
     }
 }

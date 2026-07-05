@@ -51,8 +51,12 @@ void App::checkWebTimeout() {
 // ============================================================================
 void App::writeToBackup(const char* payload) {
     if (!m_sdOk) return;
+    // Этап 5: m_devBackup — единый инстанс SdBackup (было 3 отдельных, коммит c672f98).
+    // Комбинированный/веб-очередной payload пишется в общий backup.jsn, а не в
+    // per-channel backup_ch{N}.jsn (те заполняются отдельно в App::run(), см. app.cpp).
+    m_devBackup.setFilename(Config::BACKUP_FILENAME);
     // appendLine() writes a JSON object line followed by \r\n
-    if (!m_sdBackup.appendLine(payload)) {
+    if (!m_devBackup.appendLine(payload)) {
         DBG.error("[WEB_ACTIVE] backup appendLine failed");
         return;
     }

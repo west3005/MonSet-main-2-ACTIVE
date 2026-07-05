@@ -77,9 +77,11 @@ private:
     ModbusRTU      m_modbusPort2;  ///< UART5  — датчик порт 2 (включается через rtu_ports[2].enabled)
     ModbusRTU*     m_modbusPorts[3]; ///< Индексированный массив: [0]=port0, [1]=port1, [2]=port2
     A7670C         m_gsm;
-    SdBackup       m_sdBackup;   ///< Бэкап порта 0 (USART3) — backup_p0.jsn
-    SdBackup       m_sdBackup1;  ///< Бэкап порта 1 (UART4)  — backup_p1.jsn
-    SdBackup       m_sdBackup2;  ///< Бэкап порта 2 (UART5)  — backup_p2.jsn
+    SdBackup       m_devBackup;  ///< Единый бэкап-инстанс SD; имя файла переключается
+                                  ///< setFilename() на "backup_ch{N}.jsn" для канала N
+                                  ///< (N = channel_idx устройства). Один физический
+                                  ///< SdBackup вместо трёх — FatFs не поддерживает
+                                  ///< параллельный f_mount() одной карты из разных инстансов.
     SensorReader   m_sensor;
     DataBuffer     m_buffer;
     PowerManager   m_power;
@@ -184,7 +186,9 @@ private:
     void checkWebTimeout();
 
     /**
-     * @brief Write measurement to backup.jsn with "src":"web_q" tag.
+     * @brief Write measurement to backup (m_devBackup, общий backup.jsn) with
+     *        "src":"web_q" tag — используется при постановке измерения в очередь
+     *        во время активной веб-сессии (см. app_web.cpp).
      * @param payload  JSON string to write
      */
     void writeToBackup(const char* payload);
@@ -211,6 +215,9 @@ private:
     void transmitBuffer();
     void transmitSingle(float value, const DateTime& dt);
     void retransmitBackup();
+    /// @brief true если существует хотя бы один файл бэкапа (общий backup.jsn
+    ///        или любой backup_ch{N}.jsn) — используется как гейт перед retransmitBackup().
+    bool anyBackupExists();
 
     // ---- Channel send callbacks ----
     static int sendViaEth(const char* json, uint16_t len, void* ctx);
@@ -234,6 +241,13 @@ private:
     int buildMultiSensorPayload(char* buf, size_t bsz,
                                  const char* tsStr, const DateTime& dt,
                                  bool asArray);
+
+    // ---- Per-channel backup (Этап 5: свой файл на каждый датчик) ----
+    /// @brief Формирует имя файла бэкапа для канала: "backup_ch{N}.jsn"
+    static void buildChannelBackupName(char* out, size_t sz, uint8_t channelIdx);
+    /// @brief Формирует JSON-объект для ОДНОГО показания (для файла конкретного датчика)
+    int buildChannelPayload(char* buf, size_t bsz, const char* tsStr,
+                             const DateTime& dt, const SensorReading& r);
 
     // ---- Init helpers ----
     void initModbusPorts();
