@@ -284,11 +284,11 @@ function rtuDH(p,i){
     +'<div class="f" style="max-width:70px"><label>Ед.</label><input type="text" value="'+d.un+'" onchange="rtu['+p+'].devs['+i+'].un=this.value"></div>'
     +'<div class="f" style="max-width:80px"><label>CH idx</label><input type="number" value="'+d.ci+'" onchange="rtu['+p+'].devs['+i+'].ci=+this.value"></div>'
     +'</div><div class="r"><div class="f" style="min-width:220px;flex:1"><label>Metric ID (UUID для ocean-monitor.ru)</label><input type="text" placeholder="f2656f53-463c-4d66-8ab1-e86fb11549b1" value="'+(d.mi||'')+'" onchange="rtu['+p+'].devs['+i+'].mi=this.value"></div></div>'
-    +'<div class="r"><div class="f" style="max-width:120px"><label>Опрос (тиков)</label><input type="number" min="1" value="'+(d.pi||1)+'" onchange="rtu['+p+'].devs['+i+'].pi=+this.value"></div>'
+    +'<div class="r"><div class="f" style="max-width:120px"><label>Опрос (мс)</label><input type="number" min="0" step="100" value="'+(d.pi||0)+'" onchange="rtu['+p+'].devs['+i+'].pi=+this.value"></div>'
     +'<div class="f" style="max-width:120px"><label>Усреднение (изм.)</label><input type="number" min="1" value="'+(d.aw||1)+'" onchange="rtu['+p+'].devs['+i+'].aw=+this.value"></div></div></div>';
 }
 
-function addRD(p){if(rtu[p].devs.length<8){rtu[p].devs.push({en:false,sa:1,nm:'',fc:3,rs:0,rc:1,dt:'INT16',sc:1,of:0,un:'',ci:0,mi:'',pi:1,aw:1});rndRD(p)}}
+function addRD(p){if(rtu[p].devs.length<8){rtu[p].devs.push({en:false,sa:1,nm:'',fc:3,rs:0,rc:1,dt:'INT16',sc:1,of:0,un:'',ci:0,mi:'',pi:0,aw:1});rndRD(p)}}
 function delRD(p,i){rtu[p].devs.splice(i,1);rndRD(p)}
 function rndRD(p){var h='';rtu[p].devs.forEach(function(_,i){h+=rtuDH(p,i)});document.getElementById('rd'+p).innerHTML=h;var s=document.getElementById('rds'+p);if(s)s.textContent='\u25b8 Устройства ('+rtu[p].devs.length+')'}
 
