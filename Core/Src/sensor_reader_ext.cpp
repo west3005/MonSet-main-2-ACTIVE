@@ -148,17 +148,18 @@ void SensorReader::pollRtuPorts(const ModbusRtuPortConfig* rtu_ports,
                 continue;
             }
 
-            // Этап 7: индивидуальный интервал опроса — "тики" главного цикла.
-            // 1 = опрос каждый тик (обратная совместимость с поведением до Этапа 7).
-            const uint16_t interval = (dev.poll_interval_polls == 0) ? 1u : dev.poll_interval_polls;
-            uint16_t& counter = m_pollCounters[dev.channel_idx];
-            counter++;
-            if (counter < interval) {
+            // Этап 7: индивидуальный интервал опроса — реальные миллисекунды
+            // (poll_interval_ms), не тики главного цикла. 0 = опрос на каждой
+            // итерации (обратная совместимость с поведением до перехода на мс).
+            const uint32_t nowMs = HAL_GetTick();
+            uint32_t& lastPollMs = m_lastPollTickMs[dev.channel_idx];
+            if (dev.poll_interval_ms > 0 && lastPollMs != 0 &&
+                (nowMs - lastPollMs) < dev.poll_interval_ms) {
                 // Не время опроса этого устройства — не трогаем шину, слот
                 // сохраняет предыдущее значение (valid не меняется).
                 continue;
             }
-            counter = 0;
+            lastPollMs = nowMs;
 
             // Inter-frame delay before each transaction
             if (pCfg.inter_frame_ms > 0) {
