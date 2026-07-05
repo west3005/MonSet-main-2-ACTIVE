@@ -248,6 +248,53 @@ INIT → ETHERNET_INIT → NTP_SYNC → MODEM_INIT → SENSORS_POLL → SEND_DAT
 
 ***
 
+## Архитектура программного обеспечения
+
+### Основные модули
+
+| Модуль | Файл | Назначение |
+|---|---|---|
+| Конечный автомат | `app.cpp` | Главный цикл устройства: INIT → ETHERNET_INIT → NTP_SYNC → MODEM_INIT → SENSORS_POLL → SEND_DATA → SLEEP |
+| Веб-режим | `app_web.cpp` | Переключение между рабочим и веб-режимом, обработка `web_idle_timeout_s` |
+| Конфигурация | `runtime_config.cpp` | Загрузка `runtime_config.json` с SD в RAM, обновление параметров, сохранение обратно на SD |
+| Опрос датчиков | `sensor_reader.cpp`, `sensor_reader_ext.cpp` | Опрос Modbus RTU устройств на универсальных портах, чтение нескольких датчиков на одном канале |
+| Modbus RTU | `modbus_rtu.cpp` | Формирование и разбор RTU-кадров, обмен через UART/RS-485 |
+| Карта регистров | `modbus_map.cpp` | Интерпретация конфигурируемой карты регистров Modbus из JSON |
+| Modbus TCP master | `modbus_tcp_master.cpp` | Опрос Modbus TCP устройств через Ethernet W5500 |
+| Modbus TCP slave | `modbus_tcp_slave.cpp` | Предоставление измерений наружу как Modbus-slave для SCADA |
+| Бэкап на SD | `sd_backup.cpp` | Запись неотправленных данных в `backup_p0/p1/p2.jsn`, чтение и повторная отправка |
+| Буфер измерений | `data_buffer.cpp` | Накопление значений для усреднения перед отправкой |
+| Каналы связи | `channel_manager.cpp` | Приоритетный выбор канала: Ethernet → GSM → WiFi → Iridium |
+| Веб-сервер | `web_server.cpp` | HTTP-сервер, страницы, API, авторизация, файловый доступ к SD |
+| Captive Portal | `captive_portal.cpp` | Первоначальная настройка устройства через ESP8266 в режиме точки доступа |
+| MQTT-клиент | `mqtt_client.cpp` | Передача телеметрии в ThingsBoard и совместимые брокеры |
+| HTTPS / Webhook | `https_w5500.cpp`, `webhook.cpp` | HTTPS-отправка по Ethernet и HTTP Webhook на внешний сервер |
+| RTC | `ds3231.cpp` | Работа с DS3231 по I2C1 |
+| WiFi | `esp8266.cpp` | Управление ESP8266 и взаимодействие с веб-режимом |
+| Iridium | `iridium.cpp` | Работа со спутниковым каналом SBD |
+| Батарея | `battery_monitor.cpp` | Контроль напряжения аккумулятора и формирование статуса питания |
+| Питание модулей | `power_manager.cpp` | Управление включением и восстановлением модулей связи |
+| Логирование | `circular_log.cpp`, `debug_uart.cpp` | Кольцевой лог в RAM и вывод в отладочный UART |
+
+### Приоритетная цепочка каналов
+
+```
+Ethernet W5500
+    │ (недоступен)
+    ▼
+GSM / NB-IoT
+    │ (недоступен)
+    ▼
+WiFi ESP8266
+    │ (недоступен)
+    ▼
+Iridium SBD
+```
+
+Если приоритетный канал недоступен, устройство автоматически переключается на следующий. При восстановлении более приоритетного канала возможен возврат на него без перезагрузки устройства.
+
+***
+
 ## Аппаратная архитектура — назначение портов и пинов
 
 > **Источник истины по пинам:** `Core/Inc/board_pins.hpp`  
