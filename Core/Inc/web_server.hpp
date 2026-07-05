@@ -58,7 +58,7 @@ private:
 
     static constexpr uint16_t HTTP_PORT   = 80;
 
-    static constexpr uint16_t REQ_BUF_SIZE  = 6144;   // POST /api/config ~4KB max
+    static constexpr uint16_t REQ_BUF_SIZE  = 20480;  // POST /api/upload — файлы до ~19KB (multipart overhead ~1KB)
     char m_reqBuf[REQ_BUF_SIZE];
 
     /**
