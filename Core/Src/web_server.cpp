@@ -5032,6 +5032,14 @@ void WebServer::handleApiFiles(uint8_t sn, const char* queryStr, const char* /*r
     getQueryParam(queryStr,"path",dirPath,sizeof(dirPath));
     // FatFS не принимает "/" как корень — маппируем на "0:/"
     if(std::strcmp(dirPath,"/")==0 || dirPath[0]=='\0') std::strncpy(dirPath,"0:/",sizeof(dirPath));
+    // FatFS f_opendir() не принимает завершающий "/" для НЕ корневых путей
+    // ("0:/www/" -> FR_INVALID_NAME fr=6, т.к. create_name() пытается разобрать
+    // пустой сегмент после слэша). Фронтенд (files.html) всегда шлёт путь с
+    // trailing slash при переходе в подпапку — срезаем его, оставляя только "0:/".
+    {
+        size_t dlen = std::strlen(dirPath);
+        while (dlen > 3 && dirPath[dlen-1] == '/') { dirPath[dlen-1] = '\0'; dlen--; }
+    }
 
     char resp[4096]; int n=0;
     n+=std::snprintf(resp+n,sizeof(resp)-n,"{\"path\":\"%s\",\"items\":[",dirPath);
