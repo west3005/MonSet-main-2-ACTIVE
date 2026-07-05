@@ -103,9 +103,13 @@ private:
     SensorReading m_readings[MAX_SENSOR_READINGS];
     uint8_t       m_readingCount = 0;
 
-    // Этап 7: персональные счётчики опроса на канал (индекс == channel_idx)
-    // и флаг "было ли реально опрошено в этом цикле" (для гейта записи бэкапа).
-    uint16_t m_pollCounters[MAX_SENSOR_READINGS]    = {};
+    // Этап 7: персональные timestamp'ы последнего опроса на канал (индекс ==
+    // channel_idx), мс (HAL_GetTick()) — заменили счётчик тиков главного цикла
+    // на реальное время, т.к. poll_interval теперь задаётся в миллисекундах
+    // (poll_interval_ms), а не в тиках. 0 = ещё не опрашивался ни разу (опрос
+    // произойдёт на первой же итерации независимо от poll_interval_ms).
+    // Флаг "было ли реально опрошено в этом цикле" (для гейта записи бэкапа).
+    uint32_t m_lastPollTickMs[MAX_SENSOR_READINGS]  = {};
     bool     m_freshThisCycle[MAX_SENSOR_READINGS]  = {};
 
     // Этап 8: окно усреднения ПЕРЕД записью в backup — накопитель на канал.
